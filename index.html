@@ -949,7 +949,7 @@ function renderAdminRequests() {
     <td><b>${r.dept||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
     <td><b>${r.name||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.contact||'-'}</span></td>
     <td style="font-size:12px">${(r.reason||'').substring(0,18)}${(r.reason||'').length>18?'…':''}</td>
-    <td><a href="#" onclick="showDetail('${r.id}')" style="color:var(--blue)">${r.items.length}종 ${r.items.reduce((s,i)=>s+i.qty,0)}개 ▶</a></td>
+    <td><a href="#" onclick="showDetail('${r.id}')" style="color:var(--blue)">${r.items.filter(i=>!i.cancelled).length}종 ${r.items.filter(i=>!i.cancelled).reduce((s,i)=>s+i.qty,0)}개 ▶</a></td>
     <td><span class="status-badge ${r.status}">${statusLabel(r.status)}</span></td>
     <td>${r.status==='pending'
       ?`<button class="action-btn approve" onclick="handleRequest('${r.id}','approved')">✓ 승인</button><button class="action-btn reject" onclick="promptReject('${r.id}')">✗ 반려</button>`
@@ -983,7 +983,7 @@ function renderAdminHistory() {
     <td><b>${r.dept||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
     <td><b>${r.name||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.contact||'-'}</span></td>
     <td style="font-size:12px">${r.reason||'-'}</td>
-    <td><a href="#" onclick="showDetail('${r.id}')" style="color:var(--blue)">${r.items.length}종 ${r.items.reduce((s,i)=>s+i.qty,0)}개 ▶</a></td>
+    <td><a href="#" onclick="showDetail('${r.id}')" style="color:var(--blue)">${r.items.filter(i=>!i.cancelled).length}종 ${r.items.filter(i=>!i.cancelled).reduce((s,i)=>s+i.qty,0)}개 ▶</a></td>
     <td>
         <span class="status-badge ${r.status}">${statusLabel(r.status)}</span>
         ${r.status==='distributed'?`<br><button onclick="showReportUpload('${r.id}')" style="margin-top:4px;background:var(--blue);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">📎 결과보고</button>`:''}
@@ -1069,11 +1069,12 @@ function showDetail(id) {
   }).join('');
 
   // 합계
-  const grandTotal = r.items.reduce((s,i)=>{
+  const activeItems = r.items.filter(i=>!i.cancelled);
+  const grandTotal = activeItems.reduce((s,i)=>{
     const p=PRODUCTS.find(p=>p.num===String(i.num).padStart(3,'0'));
     return s+(i.price||p?.price_num||0)*i.qty;
   },0);
-  const totalQty = r.items.reduce((s,i)=>s+i.qty,0);
+  const totalQty = activeItems.reduce((s,i)=>s+i.qty,0);
 
   // 배부 날짜/방법 입력 (승인됨 상태 관리자만)
   const distributeFields = (isAdmin && isApproved) ? `
@@ -1113,7 +1114,7 @@ function showDetail(id) {
     <div style="font-size:13px;font-weight:700;margin-bottom:6px">신청 제품 목록</div>
     ${itemRows}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding:10px;background:var(--kakao);border-radius:8px;font-weight:800">
-      <span style="color:var(--brown)">합계 ${r.items.length}종 ${totalQty}개</span>
+      <span style="color:var(--brown)">합계 ${activeItems.length}종 ${totalQty}개</span>
       <span style="color:var(--brown);font-size:15px">${grandTotal?grandTotal.toLocaleString()+'원':'-'}</span>
     </div>
     ${distributeFields}
