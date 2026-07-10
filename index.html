@@ -700,9 +700,9 @@ function renderCart() {
         <div>
           <div style="font-size:13px;font-weight:600">${p.name}</div>
           <div style="font-size:12px;color:var(--muted);margin-top:2px">${qty}개 × ${price ? price.toLocaleString()+'원' : '가격미정'} = <b style="color:var(--brown)">${total ? total.toLocaleString()+'원' : '-'}</b></div>
-          <input id="item-detail-${num}" type="text" placeholder="이 품목 상세배분사항 (예: 아동 직접 배부용)" value="${prevDetail}"
-            style="width:100%;margin-top:6px;padding:7px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none"
-            onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'">
+          <input id="item-detail-${num}" type="text" placeholder="* 상세사업 입력 필수 (예: 아동 직접 배부용)" value="${prevDetail}"
+            style="width:100%;margin-top:6px;padding:7px 10px;border:1.5px solid #f0a500;border-radius:6px;font-size:12px;outline:none"
+            onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor=this.value?'var(--border)':'#f0a500'">
         </div>
         <div style="font-size:12px;color:var(--muted);padding-top:3px;white-space:nowrap">No.${num}</div>
         <button class="remove-btn" onclick="removeFromCart('${num}')" style="padding-top:3px">✕</button>
@@ -823,12 +823,18 @@ async function submitRequest() {
   if (!reason)  { toast('사용처를 선택해주세요!'); return; }
   if (Object.keys(cart).length === 0) { toast('장바구니가 비어있습니다!'); return; }
 
-  // 품목별 상세배분사항 수집
+  // 품목별 상세배분사항 수집 + 필수 검증
   const items = Object.entries(cart).map(([num, qty]) => {
     const p      = PRODUCTS.find(x => x.num === num);
     const detail = document.getElementById(`item-detail-${num}`)?.value.trim() || '';
     return { num, qty, name: p.name, price: p.price_num || 0, total: (p.price_num || 0) * qty, detail };
   });
+  const missingDetail = items.find(i => !i.detail);
+  if (missingDetail) {
+    toast(`"${missingDetail.name}" 상세사업을 입력해주세요!`);
+    document.getElementById(`item-detail-${missingDetail.num}`)?.focus();
+    return;
+  }
 
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = '처리 중...';
