@@ -208,6 +208,7 @@ tr:hover td{background:#FFFBF0}
   <button onclick="showPage('myreq')" id="btn-myreq">주문내역 <span class="badge" id="myreq-badge" style="display:none">0</span></button>
   <button onclick="showPage('admin')" id="btn-admin" style="display:none">관리자</button>
   <button onclick="toggleCart()" id="btn-cart">📋 장바구니 <span class="badge" id="cart-badge" style="display:none">0</span></button>
+  <button onclick="showPage('feedback')" id="btn-feedback">💬 피드백</button>
   <button onclick="doLogout()" style="font-size:12px">로그아웃</button>
 </nav>
 
@@ -451,6 +452,60 @@ tr:hover td{background:#FFFBF0}
   <div id="admin-history" style="display:none"></div>
 </div>
 
+<!-- 피드백 -->
+<div class="page" id="page-feedback">
+  <div class="section-header">
+    <h2>💬 시스템 피드백</h2>
+    <button onclick="loadFeedback()" style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🔄 새로고침</button>
+  </div>
+
+  <!-- 피드백 작성 폼 -->
+  <div style="background:#fff;border-radius:14px;padding:22px;margin-bottom:20px;box-shadow:0 2px 12px rgba(0,0,0,.06)">
+    <div style="font-size:15px;font-weight:800;color:var(--brown);margin-bottom:16px">📝 피드백 남기기</div>
+
+    <!-- 별점 -->
+    <div style="margin-bottom:14px">
+      <label style="font-size:13px;font-weight:700;color:var(--muted);display:block;margin-bottom:6px">만족도</label>
+      <div id="star-rating" style="display:flex;gap:6px;font-size:28px;cursor:pointer">
+        <span onclick="setRating(1)" class="star">☆</span>
+        <span onclick="setRating(2)" class="star">☆</span>
+        <span onclick="setRating(3)" class="star">☆</span>
+        <span onclick="setRating(4)" class="star">☆</span>
+        <span onclick="setRating(5)" class="star">☆</span>
+      </div>
+    </div>
+
+    <!-- 카테고리 -->
+    <div style="margin-bottom:14px">
+      <label style="font-size:13px;font-weight:700;color:var(--muted);display:block;margin-bottom:6px">분류</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="setCategory('UI/디자인',this)" class="cat-btn" style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;background:#fff;font-size:13px;cursor:pointer">UI/디자인</button>
+        <button onclick="setCategory('기능',this)" class="cat-btn" style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;background:#fff;font-size:13px;cursor:pointer">기능</button>
+        <button onclick="setCategory('속도',this)" class="cat-btn" style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;background:#fff;font-size:13px;cursor:pointer">속도</button>
+        <button onclick="setCategory('오류',this)" class="cat-btn" style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;background:#fff;font-size:13px;cursor:pointer">오류</button>
+        <button onclick="setCategory('건의사항',this)" class="cat-btn" style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;background:#fff;font-size:13px;cursor:pointer">건의사항</button>
+        <button onclick="setCategory('기타',this)" class="cat-btn" style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;background:#fff;font-size:13px;cursor:pointer">기타</button>
+      </div>
+    </div>
+
+    <!-- 의견 -->
+    <div style="margin-bottom:16px">
+      <label style="font-size:13px;font-weight:700;color:var(--muted);display:block;margin-bottom:6px">의견 <span style="color:var(--red)">*</span></label>
+      <textarea id="feedback-text" rows="4" placeholder="사용하면서 불편했던 점, 개선됐으면 하는 기능, 칭찬 등 자유롭게 남겨주세요 😊"
+        style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;resize:vertical;outline:none;font-family:inherit;box-sizing:border-box"
+        onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+    </div>
+
+    <button onclick="submitFeedback()" style="width:100%;padding:12px;border:none;border-radius:10px;background:var(--brown);color:var(--kakao);font-size:15px;font-weight:800;cursor:pointer">💬 피드백 제출</button>
+  </div>
+
+  <!-- 전체 피드백 목록 (관리자만 보임) -->
+  <div id="feedback-list-wrap" style="display:none">
+    <div style="font-size:15px;font-weight:800;color:var(--brown);margin-bottom:12px">📋 전체 피드백</div>
+    <div id="feedback-list"></div>
+  </div>
+</div>
+
 <div id="img-viewer" onclick="closeImgViewer(event)">
   <span class="iv-close" onclick="closeImgViewer()">✕</span>
   <img id="iv-img" src="" alt="">
@@ -630,6 +685,7 @@ function showPage(id) {
   if (id==='catalog') renderCatalog();
   if (id==='myreq') loadRequestsFromAPI().then(()=>renderMyRequests());
   if (id==='admin') Promise.all([loadStockFromAPI(),loadRequestsFromAPI()]).then(()=>renderAdmin());
+  if (id==='feedback') loadFeedback();
 }
 
 // ── CART ──
@@ -1180,6 +1236,79 @@ async function distributeItems_(id, indices, date, method) {
     showDetail(id); renderAdmin(); updateStats();
   } catch(e) { toast('❌ 서버 오류: ' + e.message); }
 }
+// ── 피드백 ────────────────────────────────────────────────────
+let _feedbackRating = 0;
+let _feedbackCategory = '';
+
+function setRating(n) {
+  _feedbackRating = n;
+  document.querySelectorAll('#star-rating .star').forEach((s, i) => {
+    s.textContent = i < n ? '★' : '☆';
+    s.style.color = i < n ? '#FEE500' : '#ccc';
+  });
+}
+
+function setCategory(cat, el) {
+  _feedbackCategory = cat;
+  document.querySelectorAll('.cat-btn').forEach(b => {
+    b.style.background = '#fff';
+    b.style.borderColor = 'var(--border)';
+    b.style.color = 'inherit';
+    b.style.fontWeight = 'normal';
+  });
+  el.style.background = 'var(--brown)';
+  el.style.borderColor = 'var(--brown)';
+  el.style.color = 'var(--kakao)';
+  el.style.fontWeight = '700';
+}
+
+async function submitFeedback() {
+  const text = document.getElementById('feedback-text').value.trim();
+  if (!_feedbackRating) { toast('만족도 별점을 선택해주세요!'); return; }
+  if (!_feedbackCategory) { toast('분류를 선택해주세요!'); return; }
+  if (!text) { toast('의견을 입력해주세요!'); return; }
+  try {
+    const res = await api('submitFeedback', {
+      name: currentUser.name, dept: currentUser.dept || '', 
+      rating: _feedbackRating, category: _feedbackCategory, text
+    });
+    if (!res.ok) { toast('❌ ' + res.error); return; }
+    toast('✅ 피드백이 제출되었습니다. 감사합니다!');
+    document.getElementById('feedback-text').value = '';
+    setRating(0);
+    _feedbackCategory = '';
+    document.querySelectorAll('.cat-btn').forEach(b => {
+      b.style.background = '#fff'; b.style.borderColor = 'var(--border)';
+      b.style.color = 'inherit'; b.style.fontWeight = 'normal';
+    });
+    loadFeedback();
+  } catch(e) { toast('❌ 서버 오류: ' + e.message); }
+}
+
+async function loadFeedback() {
+  try {
+    const res = await api('getFeedback', {});
+    if (!res.ok) return;
+    const isAdmin = currentUser?.role === 'admin';
+    const wrap = document.getElementById('feedback-list-wrap');
+    const list = document.getElementById('feedback-list');
+    if (!isAdmin || res.feedbacks.length === 0) { wrap.style.display = 'none'; return; }
+    wrap.style.display = '';
+    const stars = n => '★'.repeat(n) + '☆'.repeat(5-n);
+    list.innerHTML = res.feedbacks.map(f => `
+      <div style="background:#fff;border-radius:10px;padding:14px 16px;margin-bottom:10px;box-shadow:0 1px 6px rgba(0,0,0,.06)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+          <div>
+            <span style="color:#FEE500;font-size:16px">${stars(f.rating)}</span>
+            <span style="margin-left:8px;font-size:12px;background:var(--border);padding:2px 8px;border-radius:10px">${f.category}</span>
+          </div>
+          <span style="font-size:11px;color:var(--muted)">${f.name} · ${f.createdAt}</span>
+        </div>
+        <div style="font-size:14px;line-height:1.6;color:var(--text)">${f.text}</div>
+      </div>`).join('');
+  } catch(e) {}
+}
+
 async function cancelAllItems(id) {
   if (!confirm('이 신청을 전체 취소하시겠습니까?\n재고가 복구됩니다.')) return;
   try {
