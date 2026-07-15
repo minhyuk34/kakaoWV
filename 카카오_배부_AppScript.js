@@ -8,6 +8,14 @@ const SHEET_ACCT = '계정';
 const SHEET_REQ  = '신청';
 const SHEET_STK  = '재고';
 
+// ── 스프레드시트에서 열었을 때 수동 갱신 메뉴 추가 ──────────────
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('배부현황')
+    .addItem('지금 새로고침', 'generateReport')
+    .addToUi();
+}
+
 // ── 시트 초기화 (최초 1회 실행) ──────────────────────────────
 function initSheets() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -64,6 +72,15 @@ function doPost(e) {
     else if (action === 'submitFeedback')    result = submitFeedback(data);
     else if (action === 'getFeedback')       result = getFeedback();
     else result = { ok: false, error: '알 수 없는 action' };
+
+    // 신청/재고 상태를 바꾸는 액션 이후에는 배부현황 시트를 자동 갱신
+    const REPORT_TRIGGER_ACTIONS = [
+      'submitRequest', 'updateRequest', 'approveItems', 'distributeItems',
+      'cancelRequest', 'cancelItems', 'confirmCancelItem', 'rejectCancelItem'
+    ];
+    if (result && result.ok !== false && REPORT_TRIGGER_ACTIONS.includes(action)) {
+      try { generateReport(); } catch (reportErr) { Logger.log('generateReport 실패: ' + reportErr.message); }
+    }
   } catch(err) {
     result = { ok: false, error: err.message };
   }
@@ -1013,5 +1030,6 @@ function generateReport() {
   report.setFrozenColumns(3); // 제품번호+제품명+총재고 고정
 
   Logger.log(`배부현황 시트 생성 완료: 제품 ${rowKeys.length}종 / 팀 ${totalCols}개`);
-  SpreadsheetApp.getUi().alert(`배부현황 시트가 생성되었습니다.\n제품 ${rowKeys.length}종 × 팀 ${totalCols}개`);
+  // 스프레드시트 메뉴에서 수동 실행한 경우에만 알림 표시 (웹앱에서 호출 시 UI 컨텍스트가 없어 예외 발생)
+  try { SpreadsheetApp.getUi().alert(`배부현황 시트가 생성되었습니다.\n제품 ${rowKeys.length}종 × 팀 ${totalCols}개`); } catch (e) {}
 }
