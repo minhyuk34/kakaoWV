@@ -1191,9 +1191,9 @@ function renderAdminInventory() {
   </tbody></table>`;
 }
 function renderAdminHistory() {
-  const reqs=getRequests().filter(r=>r.status==='distributed'||r.status==='rejected');
+  const reqs=getRequests().filter(r=>r.status==='distributed'||r.status==='rejected'||r.status==='cancelled');
   const el=document.getElementById('admin-history');
-  if (reqs.length===0){el.innerHTML='<div class="empty"><div class="emoji">📦</div><p>배부/반려 이력이 없습니다</p></div>';return;}
+  if (reqs.length===0){el.innerHTML='<div class="empty"><div class="emoji">📦</div><p>배부/반려/취소 이력이 없습니다</p></div>';return;}
   el.innerHTML=`<table><thead><tr><th>처리 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>제품 수</th><th>상태</th></tr></thead>
   <tbody>${reqs.map(r=>`<tr>
     <td style="font-size:12px">${r.updatedAt||r.createdAt}</td>

@@ -217,9 +217,12 @@ function getRequests({ name, role }) {
       adminNote  = r[14];
       plannedDate = r[15] || '';
     } else {
-      // 어느 쪽도 JSON이 아닌 경우 — 컬럼 수로 판단
+      // 어느 쪽도 JSON이 아닌 경우 — 시트에 수동으로 입력된 행일 가능성이 높음.
+      // (제품 목록 JSON이 없어 관리자 화면에서 조용히 사라지는 것을 방지하기 위해 pending으로 노출)
       const colCount = r.filter(c => c !== '' && c !== null && c !== undefined).length;
       status = colCount >= 13 ? String(r[12] || '') : String(r[10] || '');
+      if (!status) status = 'pending';
+      Logger.log(`⚠️ 신청 행 형식 인식 실패 (제품 목록 JSON 없음) — ID:${r[0]}, 이름:${r[4]}. 시트에서 직접 입력된 행인지 확인 필요.`);
     }
 
     let items = [];
