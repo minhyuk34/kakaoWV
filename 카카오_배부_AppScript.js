@@ -170,7 +170,7 @@ function submitRequest({ dept, team, name, contact, email, reason, pickupDate, u
     totalQty,
     'pending', '', ''
   ]);
-  // 수령요청일/사용예정일 셀이 Date 타입으로 자동 변환되지 않도록 텍스트 서식 고정
+  // 수취예정일/사용예정일 셀이 Date 타입으로 자동 변환되지 않도록 텍스트 서식 고정
   s.getRange(newRow, 9).setNumberFormat('@').setValue(formatDateOnly(pickupDate));
   s.getRange(newRow, 10).setNumberFormat('@').setValue(formatDateOnly(useDate));
   items.forEach(item => deductStock(item.num, item.qty));
@@ -193,7 +193,7 @@ function getRequests({ name, role }) {
     let totalQty   = 0;
     let updatedAt  = '';
     let adminNote  = '';
-    let plannedDate = ''; // 배부일 (관리자가 지정하는 예정 배부일)
+    let plannedDate = ''; // 배부일 (관리자가 실제 배분한 날짜)
 
     // r[8]이 JSON이면 구형(13열), r[10]이 JSON이면 신형(15열)
     const r8  = String(r[8]  || '').trim();
@@ -239,7 +239,7 @@ function getRequests({ name, role }) {
   return { ok: true, requests: filtered };
 }
 
-// ── 배부요청일(사용예정일) / 배부일(관리자 지정 예정 배부일) 수정 ──
+// ── 수취예정일 / 사용예정일 / 배부일 수정 ──
 function updateRequestSchedule({ id, pickupDate, useDate, plannedDate }) {
   const s = sheet(SHEET_REQ);
   const rows = s.getDataRange().getValues();
@@ -248,14 +248,14 @@ function updateRequestSchedule({ id, pickupDate, useDate, plannedDate }) {
     if (String(rows[i][0]) !== String(id)) continue;
 
     const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
-    if (isOld) return { ok: false, error: '구형 신청 건은 수령요청일/배부요청일/배부일을 지원하지 않습니다.' };
+    if (isOld) return { ok: false, error: '구형 신청 건은 수취예정일/사용예정일/배부일을 지원하지 않습니다.' };
 
     // 날짜 셀이 자동으로 Date 타입으로 바뀌지 않도록 텍스트 서식 고정 후 기록
     if (pickupDate !== undefined) {
-      s.getRange(i + 1, 8 + 1).setNumberFormat('@').setValue(formatDateOnly(pickupDate)); // 열 8: 수령요청일
+      s.getRange(i + 1, 8 + 1).setNumberFormat('@').setValue(formatDateOnly(pickupDate)); // 열 8: 수취예정일
     }
     if (useDate !== undefined) {
-      s.getRange(i + 1, 9 + 1).setNumberFormat('@').setValue(formatDateOnly(useDate));     // 열 9: 사용예정일(배분요청일)
+      s.getRange(i + 1, 9 + 1).setNumberFormat('@').setValue(formatDateOnly(useDate));     // 열 9: 사용예정일
     }
     if (plannedDate !== undefined) {
       s.getRange(i + 1, 15 + 1).setNumberFormat('@').setValue(formatDateOnly(plannedDate)); // 열 15: 배부일

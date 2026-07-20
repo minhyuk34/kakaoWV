@@ -1026,11 +1026,11 @@ function renderAdminRequests() {
     <label style="font-size:13px;color:var(--muted)">정렬</label>
     <select onchange="setAdminReqSort(this.value)" style="padding:6px 10px;border:2px solid var(--border);border-radius:8px;font-size:13px">
       <option value="default" ${adminReqSort==='default'?'selected':''}>신청 순(기본)</option>
-      <option value="pickupDate" ${adminReqSort==='pickupDate'?'selected':''}>수령요청일 순</option>
+      <option value="pickupDate" ${adminReqSort==='pickupDate'?'selected':''}>수취예정일 순</option>
       <option value="plannedDate" ${adminReqSort==='plannedDate'?'selected':''}>배부일 순</option>
     </select>
   </div>
-  <table><thead><tr><th>신청 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>수령요청일</th><th>배부일</th><th>신청 제품</th><th>상태</th><th>처리</th></tr></thead>
+  <table><thead><tr><th>신청 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>수취예정일</th><th>배부일</th><th>신청 제품</th><th>상태</th><th>처리</th></tr></thead>
   <tbody>${reqs.map(r=>`<tr>
     <td style="font-size:12px">${r.createdAt}</td>
     <td><b>${r.dept||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
@@ -1048,7 +1048,7 @@ function renderAdminRequests() {
     }</td>
   </tr>`).join('')}</tbody></table>`;
 }
-const SCHEDULE_FIELD_LABEL = { pickupDate: '수령요청일', useDate: '배분요청일', plannedDate: '배부일' };
+const SCHEDULE_FIELD_LABEL = { pickupDate: '수취예정일', useDate: '사용예정일', plannedDate: '배부일' };
 async function editReqSchedule(id, field, value) {
   try {
     const payload = { id };
@@ -1242,12 +1242,13 @@ function showDetail(id) {
       <div><span style="color:var(--muted)">이름</span> &nbsp;<b>${r.name||'-'}</b></div>
       <div><span style="color:var(--muted)">연락처</span> &nbsp;<b>${r.contact||'-'}</b></div>
       <div style="grid-column:1/-1"><span style="color:var(--muted)">사용처</span> &nbsp;<b>${r.reason||'-'}</b></div>
-      <div><span style="color:var(--muted)">배분요청일</span> &nbsp;<b>${dateOnly(r.useDate)||'-'}</b></div>
       ${isAdmin ? `
-      <div><span style="color:var(--muted)">수령요청일</span> &nbsp;<input type="date" value="${dateOnly(r.pickupDate)}" onchange="editReqSchedule('${r.id}','pickupDate',this.value)" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
+      <div><span style="color:var(--muted)">수취예정일</span> &nbsp;<input type="date" value="${dateOnly(r.pickupDate)}" onchange="editReqSchedule('${r.id}','pickupDate',this.value)" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
+      <div><span style="color:var(--muted)">사용예정일</span> &nbsp;<input type="date" value="${dateOnly(r.useDate)}" onchange="editReqSchedule('${r.id}','useDate',this.value)" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
       <div><span style="color:var(--muted)">배부일</span> &nbsp;<input type="date" value="${dateOnly(r.plannedDate)}" onchange="editReqSchedule('${r.id}','plannedDate',this.value)" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
       ` : `
-      <div><span style="color:var(--muted)">수령요청일</span> &nbsp;<b>${dateOnly(r.pickupDate)||'-'}</b></div>
+      <div><span style="color:var(--muted)">수취예정일</span> &nbsp;<b>${dateOnly(r.pickupDate)||'-'}</b></div>
+      <div><span style="color:var(--muted)">사용예정일</span> &nbsp;<b>${dateOnly(r.useDate)||'-'}</b></div>
       <div><span style="color:var(--muted)">배부일</span> &nbsp;<b>${dateOnly(r.plannedDate)||'-'}</b></div>
       `}
       <div style="grid-column:1/-1;color:var(--muted);font-size:12px">신청일시: ${r.createdAt}</div>
@@ -1503,10 +1504,10 @@ function showDistributeModal(id) {
         <span style="text-align:right;font-weight:600;font-size:13px;color:var(--brown)">${total?total.toLocaleString()+'원':'-'}</span>
       </div>
       ${item.detail?`<div style="font-size:11px;color:var(--blue);padding-left:28px;margin-top:3px">📌 ${item.detail}</div>`:''}
-      <!-- 하단: 신청 수취예정일 + 배부날짜 + 배부방법 -->
+      <!-- 하단: 신청 수취예정일 + 배부일 + 배부방법 -->
       <div style="display:grid;grid-template-columns:auto 1fr 1fr auto;gap:6px;align-items:center;margin-top:7px;padding-left:28px">
-        <span style="font-size:11px;color:var(--muted);white-space:nowrap">신청일: <b>${reqDate||'-'}</b></span>
-        <input id="dist-date-${idx}" type="date" value="${item.distributeDate||''}" title="배부날짜"
+        <span style="font-size:11px;color:var(--muted);white-space:nowrap">수취예정일: <b>${reqDate||'-'}</b></span>
+        <input id="dist-date-${idx}" type="date" value="${item.distributeDate||''}" title="배부일"
           style="padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
         <input id="dist-method-${idx}" type="text" value="${item.distributeMethod||''}" placeholder="배부방법 (예: 직접전달, 택배)"
           style="padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
@@ -1525,7 +1526,7 @@ function showDistributeModal(id) {
     <div style="background:#F0F4FF;border-radius:8px;padding:10px 12px;margin-bottom:10px">
       <div style="font-size:11px;font-weight:700;color:var(--brown);margin-bottom:7px">📋 일괄입력 — 선택된 항목 전체에 적용</div>
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center">
-        <input id="bulk-date"   type="date"  style="padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none" placeholder="배부날짜">
+        <input id="bulk-date"   type="date"  style="padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none" placeholder="배부일">
         <input id="bulk-method" type="text"  style="padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none" placeholder="배부방법 (예: 직접전달, 택배)">
         <button onclick="applyBulkInput()" style="padding:6px 14px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">전체 적용</button>
       </div>
