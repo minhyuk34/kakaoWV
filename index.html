@@ -995,6 +995,12 @@ function adminTab(t, el) {
   else if (t==='inventory') renderAdminInventory();
   else renderAdminHistory();
 }
+// 서버에서 혹시 ISO 타임스탬프가 섞여 와도 화면에는 항상 연/월/일까지만 표기
+function dateOnly(v) {
+  if (!v) return '';
+  const m = String(v).match(/^\d{4}-\d{2}-\d{2}/);
+  return m ? m[0] : String(v);
+}
 let adminReqSort = 'default';
 function setAdminReqSort(val) {
   adminReqSort = val;
@@ -1012,7 +1018,7 @@ function renderAdminRequests() {
     if (!bv) return -1;
     return new Date(av) - new Date(bv);
   };
-  if (adminReqSort === 'useDate')      reqs = [...reqs].sort((a,b)=>byDate(a,b,'useDate'));
+  if (adminReqSort === 'pickupDate')       reqs = [...reqs].sort((a,b)=>byDate(a,b,'pickupDate'));
   else if (adminReqSort === 'plannedDate') reqs = [...reqs].sort((a,b)=>byDate(a,b,'plannedDate'));
 
   el.innerHTML=`
@@ -1020,18 +1026,18 @@ function renderAdminRequests() {
     <label style="font-size:13px;color:var(--muted)">정렬</label>
     <select onchange="setAdminReqSort(this.value)" style="padding:6px 10px;border:2px solid var(--border);border-radius:8px;font-size:13px">
       <option value="default" ${adminReqSort==='default'?'selected':''}>신청 순(기본)</option>
-      <option value="useDate" ${adminReqSort==='useDate'?'selected':''}>배부요청일 순</option>
+      <option value="pickupDate" ${adminReqSort==='pickupDate'?'selected':''}>수령요청일 순</option>
       <option value="plannedDate" ${adminReqSort==='plannedDate'?'selected':''}>배부일 순</option>
     </select>
   </div>
-  <table><thead><tr><th>신청 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>배부요청일</th><th>배부일</th><th>신청 제품</th><th>상태</th><th>처리</th></tr></thead>
+  <table><thead><tr><th>신청 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>수령요청일</th><th>배부일</th><th>신청 제품</th><th>상태</th><th>처리</th></tr></thead>
   <tbody>${reqs.map(r=>`<tr>
     <td style="font-size:12px">${r.createdAt}</td>
     <td><b>${r.dept||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
     <td><b>${r.name||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.contact||'-'}</span></td>
     <td style="font-size:12px">${(r.reason||'').substring(0,18)}${(r.reason||'').length>18?'…':''}</td>
-    <td><input type="date" value="${r.useDate||''}" onchange="editReqSchedule('${r.id}','useDate',this.value)" style="font-size:12px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;width:126px"></td>
-    <td><input type="date" value="${r.plannedDate||''}" onchange="editReqSchedule('${r.id}','plannedDate',this.value)" style="font-size:12px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;width:126px"></td>
+    <td style="font-size:12px">${dateOnly(r.pickupDate)||'-'}</td>
+    <td style="font-size:12px">${dateOnly(r.plannedDate)||'-'}</td>
     <td><a href="#" onclick="showDetail('${r.id}')" style="color:var(--blue)">${r.items.filter(i=>!i.cancelled).length}종 ${r.items.filter(i=>!i.cancelled).reduce((s,i)=>s+i.qty,0)}개 ▶</a></td>
     <td><span class="status-badge ${r.status}">${statusLabel(r.status)}</span></td>
     <td>${r.status==='pending'
@@ -1042,6 +1048,7 @@ function renderAdminRequests() {
     }</td>
   </tr>`).join('')}</tbody></table>`;
 }
+const SCHEDULE_FIELD_LABEL = { pickupDate: '수령요청일', useDate: '배분요청일', plannedDate: '배부일' };
 async function editReqSchedule(id, field, value) {
   try {
     const payload = { id };
@@ -1050,7 +1057,8 @@ async function editReqSchedule(id, field, value) {
     if (!res.ok) { toast('❌ 저장 실패: '+res.error); return; }
     const r = getRequests().find(x=>String(x.id)===String(id));
     if (r) r[field] = value;
-    toast(field==='useDate' ? '✅ 배부요청일 수정됨' : '✅ 배부일 수정됨');
+    toast(`✅ ${SCHEDULE_FIELD_LABEL[field]||field} 수정됨`);
+    renderAdminRequests();
   } catch(e) { toast('❌ 서버 오류: '+e.message); }
 }
 async function refreshReportSheet() {
@@ -1234,8 +1242,14 @@ function showDetail(id) {
       <div><span style="color:var(--muted)">이름</span> &nbsp;<b>${r.name||'-'}</b></div>
       <div><span style="color:var(--muted)">연락처</span> &nbsp;<b>${r.contact||'-'}</b></div>
       <div style="grid-column:1/-1"><span style="color:var(--muted)">사용처</span> &nbsp;<b>${r.reason||'-'}</b></div>
-      <div><span style="color:var(--muted)">수령요청일</span> &nbsp;<b>${r.pickupDate||'-'}</b></div>
-      <div><span style="color:var(--muted)">배분요청일</span> &nbsp;<b>${r.useDate||'-'}</b></div>
+      <div><span style="color:var(--muted)">배분요청일</span> &nbsp;<b>${dateOnly(r.useDate)||'-'}</b></div>
+      ${isAdmin ? `
+      <div><span style="color:var(--muted)">수령요청일</span> &nbsp;<input type="date" value="${dateOnly(r.pickupDate)}" onchange="editReqSchedule('${r.id}','pickupDate',this.value)" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
+      <div><span style="color:var(--muted)">배부일</span> &nbsp;<input type="date" value="${dateOnly(r.plannedDate)}" onchange="editReqSchedule('${r.id}','plannedDate',this.value)" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
+      ` : `
+      <div><span style="color:var(--muted)">수령요청일</span> &nbsp;<b>${dateOnly(r.pickupDate)||'-'}</b></div>
+      <div><span style="color:var(--muted)">배부일</span> &nbsp;<b>${dateOnly(r.plannedDate)||'-'}</b></div>
+      `}
       <div style="grid-column:1/-1;color:var(--muted);font-size:12px">신청일시: ${r.createdAt}</div>
     </div>
     <div style="font-size:13px;font-weight:700;margin-bottom:6px">신청 제품 목록</div>

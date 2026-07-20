@@ -160,6 +160,7 @@ function submitRequest({ dept, team, name, contact, email, reason, pickupDate, u
   const s = sheet(SHEET_REQ);
   const id = Date.now().toString();
   const totalQty = items.reduce((sum, i) => sum + i.qty, 0);
+  const newRow = s.getLastRow() + 1;
   s.appendRow([
     id,
     new Date().toLocaleString('ko-KR'),
@@ -169,6 +170,9 @@ function submitRequest({ dept, team, name, contact, email, reason, pickupDate, u
     totalQty,
     'pending', '', ''
   ]);
+  // 수령요청일/사용예정일 셀이 Date 타입으로 자동 변환되지 않도록 텍스트 서식 고정
+  s.getRange(newRow, 9).setNumberFormat('@').setValue(formatDateOnly(pickupDate));
+  s.getRange(newRow, 10).setNumberFormat('@').setValue(formatDateOnly(useDate));
   items.forEach(item => deductStock(item.num, item.qty));
   return { ok: true, id };
 }
@@ -224,7 +228,10 @@ function getRequests({ name, role }) {
     reqs.push({
       id: r[0], createdAt: r[1], dept: r[2], team: r[3], name: r[4],
       contact: r[5], email: r[6], reason: r[7],
-      pickupDate, useDate, items, totalQty, status, updatedAt, adminNote, plannedDate
+      pickupDate: formatDateOnly(pickupDate),
+      useDate: formatDateOnly(useDate),
+      items, totalQty, status, updatedAt, adminNote,
+      plannedDate: formatDateOnly(plannedDate)
     });
   });
 
@@ -233,7 +240,7 @@ function getRequests({ name, role }) {
 }
 
 // ── 배부요청일(사용예정일) / 배부일(관리자 지정 예정 배부일) 수정 ──
-function updateRequestSchedule({ id, useDate, plannedDate }) {
+function updateRequestSchedule({ id, pickupDate, useDate, plannedDate }) {
   const s = sheet(SHEET_REQ);
   const rows = s.getDataRange().getValues();
 
@@ -241,10 +248,18 @@ function updateRequestSchedule({ id, useDate, plannedDate }) {
     if (String(rows[i][0]) !== String(id)) continue;
 
     const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
-    if (isOld) return { ok: false, error: '구형 신청 건은 배부요청일/배부일을 지원하지 않습니다.' };
+    if (isOld) return { ok: false, error: '구형 신청 건은 수령요청일/배부요청일/배부일을 지원하지 않습니다.' };
 
-    if (useDate !== undefined) s.getRange(i + 1, 9 + 1).setValue(useDate);   // 열 9(0-idx): 사용예정일(배부요청일)
-    if (plannedDate !== undefined) s.getRange(i + 1, 15 + 1).setValue(plannedDate); // 열 15(0-idx): 배부일(신규)
+    // 날짜 셀이 자동으로 Date 타입으로 바뀌지 않도록 텍스트 서식 고정 후 기록
+    if (pickupDate !== undefined) {
+      s.getRange(i + 1, 8 + 1).setNumberFormat('@').setValue(formatDateOnly(pickupDate)); // 열 8: 수령요청일
+    }
+    if (useDate !== undefined) {
+      s.getRange(i + 1, 9 + 1).setNumberFormat('@').setValue(formatDateOnly(useDate));     // 열 9: 사용예정일(배분요청일)
+    }
+    if (plannedDate !== undefined) {
+      s.getRange(i + 1, 15 + 1).setNumberFormat('@').setValue(formatDateOnly(plannedDate)); // 열 15: 배부일
+    }
 
     return { ok: true };
   }
@@ -912,6 +927,19 @@ function sheet(name) {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
 }
 
+// 시트가 날짜처럼 보이는 문자열을 Date 객체로 자동 변환해버리는 문제를 방지:
+// 항상 'yyyy-MM-dd' 형태의 순수 문자열로 정규화
+function formatDateOnly(v) {
+  if (!v) return '';
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Seoul', 'yyyy-MM-dd');
+  const s = String(v).trim();
+  const m = s.match(/^\d{4}-\d{2}-\d{2}/);
+  if (m) return m[0];
+  const d = new Date(s);
+  if (!isNaN(d)) return Utilities.formatDate(d, 'Asia/Seoul', 'yyyy-MM-dd');
+  return s;
+}
+
 function sha256(str) {
   const bytes = Utilities.computeDigest(
     Utilities.DigestAlgorithm.SHA_256, str, Utilities.Charset.UTF_8
@@ -1102,7 +1130,7 @@ function sendUpcomingPickupReminder() {
     // 구형(13열) 행은 수취예정일 컬럼이 없어 대상에서 제외
     if (!(r10.startsWith('[') || r10.startsWith('{'))) return;
 
-    const pickupDate = r[8];
+    const pickupDate = formatDateOnly(r[8]);
     const itemsJson  = r10;
     const status     = String(r[12] || '');
     if (!pickupDate) return;
@@ -1233,7 +1261,7 @@ function syncPickupCalendar() {
     const r10 = String(r[10] || '').trim();
     if (!(r10.startsWith('[') || r10.startsWith('{'))) return; // 구형 행은 수취예정일 없음
 
-    const pickupDate = r[8];
+    const pickupDate = formatDateOnly(r[8]);
     const status = String(r[12] || '');
     if (!pickupDate) return;
     if (status === 'cancelled' || status === 'rejected' || status === 'distributed') return;
