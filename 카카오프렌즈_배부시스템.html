@@ -995,16 +995,43 @@ function adminTab(t, el) {
   else if (t==='inventory') renderAdminInventory();
   else renderAdminHistory();
 }
+let adminReqSort = 'default';
+function setAdminReqSort(val) {
+  adminReqSort = val;
+  renderAdminRequests();
+}
 function renderAdminRequests() {
-  const reqs=getRequests().filter(r=>r.status==='pending'||r.status==='approved'||r.items?.some(i=>i.cancelRequested));
+  let reqs=getRequests().filter(r=>r.status==='pending'||r.status==='approved'||r.items?.some(i=>i.cancelRequested));
   const el=document.getElementById('admin-requests');
   if (reqs.length===0){el.innerHTML='<div class="empty"><div class="emoji">✅</div><p>처리할 신청이 없습니다</p></div>';return;}
-  el.innerHTML=`<table><thead><tr><th>신청 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>신청 제품</th><th>상태</th><th>처리</th></tr></thead>
+
+  const byDate = (a,b,field) => {
+    const av = a[field], bv = b[field];
+    if (!av && !bv) return 0;
+    if (!av) return 1;  // 날짜 없는 항목은 뒤로
+    if (!bv) return -1;
+    return new Date(av) - new Date(bv);
+  };
+  if (adminReqSort === 'useDate')      reqs = [...reqs].sort((a,b)=>byDate(a,b,'useDate'));
+  else if (adminReqSort === 'plannedDate') reqs = [...reqs].sort((a,b)=>byDate(a,b,'plannedDate'));
+
+  el.innerHTML=`
+  <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:10px">
+    <label style="font-size:13px;color:var(--muted)">정렬</label>
+    <select onchange="setAdminReqSort(this.value)" style="padding:6px 10px;border:2px solid var(--border);border-radius:8px;font-size:13px">
+      <option value="default" ${adminReqSort==='default'?'selected':''}>신청 순(기본)</option>
+      <option value="useDate" ${adminReqSort==='useDate'?'selected':''}>배부요청일 순</option>
+      <option value="plannedDate" ${adminReqSort==='plannedDate'?'selected':''}>배부일 순</option>
+    </select>
+  </div>
+  <table><thead><tr><th>신청 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>배부요청일</th><th>배부일</th><th>신청 제품</th><th>상태</th><th>처리</th></tr></thead>
   <tbody>${reqs.map(r=>`<tr>
     <td style="font-size:12px">${r.createdAt}</td>
     <td><b>${r.dept||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
     <td><b>${r.name||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.contact||'-'}</span></td>
     <td style="font-size:12px">${(r.reason||'').substring(0,18)}${(r.reason||'').length>18?'…':''}</td>
+    <td><input type="date" value="${r.useDate||''}" onchange="editReqSchedule('${r.id}','useDate',this.value)" style="font-size:12px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;width:126px"></td>
+    <td><input type="date" value="${r.plannedDate||''}" onchange="editReqSchedule('${r.id}','plannedDate',this.value)" style="font-size:12px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;width:126px"></td>
     <td><a href="#" onclick="showDetail('${r.id}')" style="color:var(--blue)">${r.items.filter(i=>!i.cancelled).length}종 ${r.items.filter(i=>!i.cancelled).reduce((s,i)=>s+i.qty,0)}개 ▶</a></td>
     <td><span class="status-badge ${r.status}">${statusLabel(r.status)}</span></td>
     <td>${r.status==='pending'
@@ -1014,6 +1041,29 @@ function renderAdminRequests() {
       </div>`
     }</td>
   </tr>`).join('')}</tbody></table>`;
+}
+async function editReqSchedule(id, field, value) {
+  try {
+    const payload = { id };
+    payload[field] = value;
+    const res = await api('updateRequestSchedule', payload);
+    if (!res.ok) { toast('❌ 저장 실패: '+res.error); return; }
+    const r = getRequests().find(x=>String(x.id)===String(id));
+    if (r) r[field] = value;
+    toast(field==='useDate' ? '✅ 배부요청일 수정됨' : '✅ 배부일 수정됨');
+  } catch(e) { toast('❌ 서버 오류: '+e.message); }
+}
+async function refreshReportSheet() {
+  const btn = document.getElementById('report-refresh-btn');
+  if (btn) { btn.disabled=true; btn.textContent='⏳ 갱신 중...'; }
+  try {
+    const res = await api('generateReport', {});
+    if (res.ok) toast('✅ 배부현황 시트가 갱신되었습니다');
+    else toast('❌ 배부현황 갱신 실패: ' + (res.error || '알 수 없는 오류'));
+  } catch(e) {
+    toast('❌ 서버 오류: ' + e.message);
+  }
+  if (btn) { btn.disabled=false; btn.textContent='📊 배부현황 시트 새로고침'; }
 }
 function renderAdminInventory() {
   const el=document.getElementById('admin-inventory');
@@ -1032,7 +1082,13 @@ function renderAdminInventory() {
       </td>
     </tr>`;
   }).join('');
-  el.innerHTML=`<table><thead><tr><th>No.</th><th>제품명</th><th>최초재고</th><th>신청(배부)재고</th><th>현재재고</th></tr></thead>
+  el.innerHTML=`<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+    <button onclick="refreshReportSheet()" id="report-refresh-btn"
+      style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">
+      📊 배부현황 시트 새로고침
+    </button>
+  </div>
+  <table><thead><tr><th>No.</th><th>제품명</th><th>최초재고</th><th>신청(배부)재고</th><th>현재재고</th></tr></thead>
   <tbody>${rows}
   <tr style="font-weight:700;background:var(--tag-bg)">
     <td colspan="2">합계</td>
@@ -1178,6 +1234,8 @@ function showDetail(id) {
       <div><span style="color:var(--muted)">이름</span> &nbsp;<b>${r.name||'-'}</b></div>
       <div><span style="color:var(--muted)">연락처</span> &nbsp;<b>${r.contact||'-'}</b></div>
       <div style="grid-column:1/-1"><span style="color:var(--muted)">사용처</span> &nbsp;<b>${r.reason||'-'}</b></div>
+      <div><span style="color:var(--muted)">수령요청일</span> &nbsp;<b>${r.pickupDate||'-'}</b></div>
+      <div><span style="color:var(--muted)">배분요청일</span> &nbsp;<b>${r.useDate||'-'}</b></div>
       <div style="grid-column:1/-1;color:var(--muted);font-size:12px">신청일시: ${r.createdAt}</div>
     </div>
     <div style="font-size:13px;font-weight:700;margin-bottom:6px">신청 제품 목록</div>

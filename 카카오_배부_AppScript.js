@@ -7,12 +7,18 @@ const SHEET_ID   = 'YOUR_SPREADSHEET_ID'; // ← 스프레드시트 ID
 const SHEET_ACCT = '계정';
 const SHEET_REQ  = '신청';
 const SHEET_STK  = '재고';
+const ADMIN_EMAIL = 'minhyuk_jang@worldvision.or.kr';
 
 // ── 스프레드시트에서 열었을 때 수동 갱신 메뉴 추가 ──────────────
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('배부현황')
     .addItem('지금 새로고침', 'generateReport')
+    .addSeparator()
+    .addItem('수취예정 리마인더 지금 발송', 'sendUpcomingPickupReminder')
+    .addItem('수취예정 리마인더 매주 월요일 자동발송 등록', 'setupWeeklyPickupReminderTrigger')
+    .addSeparator()
+    .addItem('수취일정 캘린더 지금 동기화', 'syncPickupCalendar')
     .addToUi();
 }
 
@@ -58,6 +64,7 @@ function doPost(e) {
     else if (action === 'submitRequest') result = submitRequest(data);
     else if (action === 'getRequests')   result = getRequests(data);
     else if (action === 'updateRequest') result = updateRequest(data);
+    else if (action === 'updateRequestSchedule') result = updateRequestSchedule(data);
     else if (action === 'getStock')      result = getStock();
     else if (action === 'updateStock')   result = updateStock(data);
     else if (action === 'syncStock')       result = syncStock();
@@ -76,10 +83,24 @@ function doPost(e) {
     // 신청/재고 상태를 바꾸는 액션 이후에는 배부현황 시트를 자동 갱신
     const REPORT_TRIGGER_ACTIONS = [
       'submitRequest', 'updateRequest', 'approveItems', 'distributeItems',
-      'cancelRequest', 'cancelItems', 'confirmCancelItem', 'rejectCancelItem'
+      'cancelRequest', 'cancelItems', 'confirmCancelItem', 'rejectCancelItem',
+      'updateRequestSchedule'
     ];
-    if (result && result.ok !== false && REPORT_TRIGGER_ACTIONS.includes(action)) {
-      try { generateReport(); } catch (reportErr) { Logger.log('generateReport 실패: ' + reportErr.message); }
+    if (action === 'generateReport') {
+      // 프런트에서 수동 새로고침 요청 시 직접 호출 가능
+      try { generateReport(); result = { ok: true }; }
+      catch (reportErr) { result = { ok: false, error: reportErr.message }; }
+    } else if (result && result.ok !== false && REPORT_TRIGGER_ACTIONS.includes(action)) {
+      try { generateReport(); }
+      catch (reportErr) {
+        Logger.log('generateReport 실패: ' + reportErr.message);
+        result._reportError = reportErr.message; // 화면에서 확인 가능하도록 원래 결과에 첨부
+      }
+      try { syncPickupCalendar(); }
+      catch (calErr) {
+        Logger.log('syncPickupCalendar 실패: ' + calErr.message);
+        result._calendarError = calErr.message;
+      }
     }
   } catch(err) {
     result = { ok: false, error: err.message };
@@ -168,6 +189,7 @@ function getRequests({ name, role }) {
     let totalQty   = 0;
     let updatedAt  = '';
     let adminNote  = '';
+    let plannedDate = ''; // 배부일 (관리자가 지정하는 예정 배부일)
 
     // r[8]이 JSON이면 구형(13열), r[10]이 JSON이면 신형(15열)
     const r8  = String(r[8]  || '').trim();
@@ -189,6 +211,7 @@ function getRequests({ name, role }) {
       status     = String(r[12] || '');
       updatedAt  = r[13];
       adminNote  = r[14];
+      plannedDate = r[15] || '';
     } else {
       // 어느 쪽도 JSON이 아닌 경우 — 컬럼 수로 판단
       const colCount = r.filter(c => c !== '' && c !== null && c !== undefined).length;
@@ -201,12 +224,31 @@ function getRequests({ name, role }) {
     reqs.push({
       id: r[0], createdAt: r[1], dept: r[2], team: r[3], name: r[4],
       contact: r[5], email: r[6], reason: r[7],
-      pickupDate, useDate, items, totalQty, status, updatedAt, adminNote
+      pickupDate, useDate, items, totalQty, status, updatedAt, adminNote, plannedDate
     });
   });
 
   const filtered = reqs.filter(r => role === 'admin' || r.name === name);
   return { ok: true, requests: filtered };
+}
+
+// ── 배부요청일(사용예정일) / 배부일(관리자 지정 예정 배부일) 수정 ──
+function updateRequestSchedule({ id, useDate, plannedDate }) {
+  const s = sheet(SHEET_REQ);
+  const rows = s.getDataRange().getValues();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) !== String(id)) continue;
+
+    const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
+    if (isOld) return { ok: false, error: '구형 신청 건은 배부요청일/배부일을 지원하지 않습니다.' };
+
+    if (useDate !== undefined) s.getRange(i + 1, 9 + 1).setValue(useDate);   // 열 9(0-idx): 사용예정일(배부요청일)
+    if (plannedDate !== undefined) s.getRange(i + 1, 15 + 1).setValue(plannedDate); // 열 15(0-idx): 배부일(신규)
+
+    return { ok: true };
+  }
+  return { ok: false, error: '신청을 찾을 수 없습니다.' };
 }
 
 // ── 신청 상태 변경 + 이메일 발송 ─────────────────────────────
@@ -1032,4 +1074,193 @@ function generateReport() {
   Logger.log(`배부현황 시트 생성 완료: 제품 ${rowKeys.length}종 / 팀 ${totalCols}개`);
   // 스프레드시트 메뉴에서 수동 실행한 경우에만 알림 표시 (웹앱에서 호출 시 UI 컨텍스트가 없어 예외 발생)
   try { SpreadsheetApp.getUi().alert(`배부현황 시트가 생성되었습니다.\n제품 ${rowKeys.length}종 × 팀 ${totalCols}개`); } catch (e) {}
+}
+
+// ── 수취예정일 한 달 이내 신청 건 관리자 메일 발송 ─────────────────
+// 매주 월요일 자동 발송 트리거는 setupWeeklyPickupReminderTrigger()로 1회 등록
+const STATUS_LABEL_KO = {
+  pending: '대기중', approved: '승인완료', distributed: '배부완료',
+  cancelled: '취소됨', rejected: '반려됨'
+};
+
+function sendUpcomingPickupReminder() {
+  const rows = sheet(SHEET_REQ).getDataRange().getValues().slice(1);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() + 30);
+
+  const upcoming = [];
+
+  rows.forEach(r => {
+    if (!r[0]) return;
+
+    const r8  = String(r[8]  || '').trim();
+    const r10 = String(r[10] || '').trim();
+
+    // 구형(13열) 행은 수취예정일 컬럼이 없어 대상에서 제외
+    if (!(r10.startsWith('[') || r10.startsWith('{'))) return;
+
+    const pickupDate = r[8];
+    const itemsJson  = r10;
+    const status     = String(r[12] || '');
+    if (!pickupDate) return;
+    if (status === 'cancelled' || status === 'rejected' || status === 'distributed') return;
+
+    const pd = new Date(pickupDate);
+    if (isNaN(pd)) return;
+    pd.setHours(0, 0, 0, 0);
+    if (pd < today || pd > cutoff) return;
+
+    let items = [];
+    try { items = JSON.parse(itemsJson || '[]'); } catch (e) {}
+    const activeItems = items.filter(i => !i.cancelled);
+    if (activeItems.length === 0) return;
+
+    upcoming.push({
+      pickupDate, status,
+      dept: r[2], team: r[3], name: r[4], contact: r[5],
+      items: activeItems
+    });
+  });
+
+  if (upcoming.length === 0) {
+    Logger.log('한 달 이내 수취예정 신청 없음 - 메일 발송 생략');
+    return;
+  }
+
+  upcoming.sort((a, b) => new Date(a.pickupDate) - new Date(b.pickupDate));
+
+  const rowsHtml = upcoming.map(u => {
+    const itemList = u.items.map(i => `${i.name} × ${i.qty}개`).join('<br>');
+    return `<tr>
+      <td style="padding:8px;border:1px solid #ddd">${u.pickupDate}</td>
+      <td style="padding:8px;border:1px solid #ddd">${u.dept || ''} / ${u.team || ''}</td>
+      <td style="padding:8px;border:1px solid #ddd">${u.name || ''}</td>
+      <td style="padding:8px;border:1px solid #ddd">${u.contact || ''}</td>
+      <td style="padding:8px;border:1px solid #ddd">${itemList}</td>
+      <td style="padding:8px;border:1px solid #ddd">${STATUS_LABEL_KO[u.status] || u.status}</td>
+    </tr>`;
+  }).join('');
+
+  const fmt = d => Utilities.formatDate(d, 'Asia/Seoul', 'yyyy-MM-dd');
+  const html = `
+    <div style="font-family:sans-serif">
+      <h2>📦 수취예정일 한 달 이내 신청 목록</h2>
+      <p>오늘(${fmt(today)}) 기준, ${fmt(cutoff)}까지 수취 예정인 카카오프렌즈 GIK 신청 건입니다.</p>
+      <table style="border-collapse:collapse;width:100%;font-size:13px">
+        <thead><tr style="background:#3C1E1E;color:#FEE500">
+          <th style="padding:8px;border:1px solid #ddd">수취예정일</th>
+          <th style="padding:8px;border:1px solid #ddd">본부/팀</th>
+          <th style="padding:8px;border:1px solid #ddd">신청인</th>
+          <th style="padding:8px;border:1px solid #ddd">연락처</th>
+          <th style="padding:8px;border:1px solid #ddd">신청 물품/수량</th>
+          <th style="padding:8px;border:1px solid #ddd">상태</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <p style="color:#888;font-size:12px;margin-top:16px">매주 월요일 자동 발송되는 메일입니다.</p>
+    </div>
+  `;
+
+  MailApp.sendEmail({
+    to: ADMIN_EMAIL,
+    subject: `[카카오프렌즈 GIK] 수취예정 한 달 이내 신청 ${upcoming.length}건`,
+    htmlBody: html
+  });
+  Logger.log(`수취예정 리마인더 메일 발송 완료: ${upcoming.length}건`);
+}
+
+// ── Apps Script 편집기에서 1회만 실행: 매주 월요일 오전 9시 트리거 등록 ──
+function setupWeeklyPickupReminderTrigger() {
+  ScriptApp.getProjectTriggers()
+    .filter(t => ['sendUpcomingPickupReminder', 'syncPickupCalendar'].includes(t.getHandlerFunction()))
+    .forEach(t => ScriptApp.deleteTrigger(t));
+
+  ScriptApp.newTrigger('sendUpcomingPickupReminder')
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.MONDAY)
+    .atHour(9)
+    .create();
+
+  // 웹앱 사용이 없는 주에도 캘린더가 최신 상태를 유지하도록 매일 동기화
+  ScriptApp.newTrigger('syncPickupCalendar')
+    .timeBased()
+    .everyDays(1)
+    .atHour(6)
+    .create();
+
+  Logger.log('매주 월요일 오전 9시 리마인더 + 매일 오전 6시 캘린더 동기화 트리거 등록 완료');
+}
+
+// ── 수취예정일 캘린더 동기화 ──────────────────────────────────
+// "카카오프렌즈 GIK 수취일정"이라는 전용 캘린더를 만들어 관리자 구글 캘린더에 표시
+const PICKUP_CAL_PROP_KEY = 'PICKUP_CALENDAR_ID';
+const PICKUP_CAL_NAME     = '카카오프렌즈 GIK 수취일정';
+
+function getPickupCalendar() {
+  const props = PropertiesService.getScriptProperties();
+  const savedId = props.getProperty(PICKUP_CAL_PROP_KEY);
+  if (savedId) {
+    const cal = CalendarApp.getCalendarById(savedId);
+    if (cal) return cal;
+  }
+  const cal = CalendarApp.createCalendar(PICKUP_CAL_NAME);
+  props.setProperty(PICKUP_CAL_PROP_KEY, cal.getId());
+  Logger.log(`캘린더 신규 생성: ${PICKUP_CAL_NAME} (${cal.getId()})`);
+  return cal;
+}
+
+// 이 캘린더는 시스템 전용이므로 매번 전체 삭제 후 재생성해 최신 상태를 유지
+function syncPickupCalendar() {
+  const cal = getPickupCalendar();
+
+  const rangeStart = new Date();
+  rangeStart.setDate(rangeStart.getDate() - 14); // 지난 2주까지 포함 (놓친 수취 파악용)
+  rangeStart.setHours(0, 0, 0, 0);
+  const rangeEnd = new Date();
+  rangeEnd.setDate(rangeEnd.getDate() + 180);
+  rangeEnd.setHours(23, 59, 59, 999);
+
+  cal.getEvents(rangeStart, rangeEnd).forEach(ev => ev.deleteEvent());
+
+  const rows = sheet(SHEET_REQ).getDataRange().getValues().slice(1);
+  let count = 0;
+
+  rows.forEach(r => {
+    if (!r[0]) return;
+    const r10 = String(r[10] || '').trim();
+    if (!(r10.startsWith('[') || r10.startsWith('{'))) return; // 구형 행은 수취예정일 없음
+
+    const pickupDate = r[8];
+    const status = String(r[12] || '');
+    if (!pickupDate) return;
+    if (status === 'cancelled' || status === 'rejected' || status === 'distributed') return;
+
+    const pd = new Date(pickupDate);
+    if (isNaN(pd)) return;
+    if (pd < rangeStart || pd > rangeEnd) return;
+
+    let items = [];
+    try { items = JSON.parse(r10 || '[]'); } catch (e) {}
+    const activeItems = items.filter(i => !i.cancelled);
+    if (activeItems.length === 0) return;
+
+    const dept = r[2], team = r[3], name = r[4], contact = r[5];
+    const itemSummary = activeItems.map(i => `${i.name}×${i.qty}`).join(', ');
+    const title = `📦 ${name} (${dept}/${team}) 수취예정`;
+    const desc = [
+      `신청인: ${name}`,
+      `연락처: ${contact}`,
+      `본부/팀: ${dept} / ${team}`,
+      `상태: ${STATUS_LABEL_KO[status] || status}`,
+      `물품: ${itemSummary}`
+    ].join('\n');
+
+    cal.createAllDayEvent(title, pd, { description: desc });
+    count++;
+  });
+
+  Logger.log(`수취일정 캘린더 동기화 완료: ${count}건`);
 }
