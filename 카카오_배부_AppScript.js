@@ -69,6 +69,7 @@ function doPost(e) {
     else if (action === 'updateStock')   result = updateStock(data);
     else if (action === 'syncStock')       result = syncStock();
     else if (action === 'approveItems')    result = approveItems(data);
+    else if (action === 'updateItemQty')   result = updateItemQty(data);
     else if (action === 'distributeItems') result = distributeItems(data);
     else if (action === 'cancelRequest')   result = cancelRequest(data);
     else if (action === 'cancelItems')       result = cancelItems(data);
@@ -84,7 +85,7 @@ function doPost(e) {
     const REPORT_TRIGGER_ACTIONS = [
       'submitRequest', 'updateRequest', 'approveItems', 'distributeItems',
       'cancelRequest', 'cancelItems', 'confirmCancelItem', 'rejectCancelItem',
-      'updateRequestSchedule'
+      'updateRequestSchedule', 'updateItemQty'
     ];
     if (action === 'generateReport') {
       // 프런트에서 수동 새로고침 요청 시 직접 호출 가능
@@ -139,6 +140,18 @@ function login({ name, hash }) {
 
 // ── 신청 제출 (신청 즉시 재고 차감) ──────────────────────────
 function submitRequest({ dept, team, name, contact, email, reason, pickupDate, useDate, items }) {
+  // 동시에 여러 명이 신청할 때 "재고 확인 → 차감" 사이에 끼어들어
+  // 둘 다 통과해버리는 경쟁 상태(race condition)를 막기 위한 잠금
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    return submitRequest_(arguments[0]);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function submitRequest_({ dept, team, name, contact, email, reason, pickupDate, useDate, items }) {
   // ── 재고 사전 검증 (서버에서 실시간 확인) ──────────────────
   const stockResult = getStock();
   const insufficient = [];
@@ -471,9 +484,83 @@ function adjustStock(num, delta) {
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][0]).padStart(3, '0') === paddedNum) {
       const cur = Number(rows[i][2]) || 0;
-      s.getRange(i + 1, 3).setValue(Math.max(0, cur + delta));
+      const next = cur + delta;
+      if (next < 0) {
+        // 재고보다 많이 차감되는 경우 — 배부현황 리포트(JSON 원본 기준)와 재고 시트가
+        // 어긋나는 원인이 되므로 0으로 조용히 밀어넣지 않고 반드시 로그를 남긴다.
+        Logger.log(`⚠️ 재고 음수 발생 방지: 제품 ${paddedNum} 현재 ${cur} + 변화량 ${delta} = ${next} → 0으로 조정. syncStock() 실행 권장.`);
+      }
+      s.getRange(i + 1, 3).setValue(Math.max(0, next));
       return;
     }
+  }
+}
+
+// 관리자가 신청 수량을 직접 수정할 때 사용 — 재고 부족 상태를 감추지 않고
+// 음수(마이너스 표시)까지 그대로 반영해 실제 부족분을 화면에서 바로 알 수 있게 한다
+function adjustStockAllowNegative(num, delta) {
+  const s = sheet(SHEET_STK);
+  const rows = s.getDataRange().getValues();
+  const paddedNum = String(num).padStart(3, '0');
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).padStart(3, '0') === paddedNum) {
+      const cur = Number(rows[i][2]) || 0;
+      const next = cur + delta;
+      s.getRange(i + 1, 3).setValue(next);
+      return next;
+    }
+  }
+  return null;
+}
+
+// ── 관리자 - 신청 항목 수량 직접 수정 ─────────────────────────
+// 수량이 줄면 그만큼 재고 복구, 늘면 그만큼 재고 추가 차감.
+// 결과 재고가 0 이하가 되면 stockWarning:true 로 알려 프런트에서 경고 팝업을 띄우게 한다.
+function updateItemQty({ id, idx, qty }) {
+  qty = Number(qty);
+  if (isNaN(qty) || qty < 0) return { ok: false, error: '올바른 수량을 입력하세요.' };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = sheet(SHEET_REQ);
+    const rows = s.getDataRange().getValues();
+
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) !== String(id)) continue;
+
+      const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
+      if (isOld) return { ok: false, error: '구형 신청 건은 수량 수정을 지원하지 않습니다.' };
+
+      const itemsCol = 10, totalQtyCol = 11, updatedCol = 13;
+      let items = [];
+      try { items = JSON.parse(rows[i][itemsCol] || '[]'); } catch (e) {}
+
+      if (!items[idx]) return { ok: false, error: '항목을 찾을 수 없습니다.' };
+      if (items[idx].cancelled)   return { ok: false, error: '취소된 항목은 수량을 수정할 수 없습니다.' };
+      if (items[idx].distributed) return { ok: false, error: '이미 배부된 항목은 수량을 수정할 수 없습니다.' };
+
+      const oldQty = Number(items[idx].qty) || 0;
+      const delta  = qty - oldQty; // 늘어난 만큼 재고 추가 차감(음수), 줄어든 만큼 재고 복구(양수)
+      const newStock = adjustStockAllowNegative(items[idx].num, -delta);
+
+      items[idx].qty = qty;
+      const activeTotal = items.filter(it => !it.cancelled).reduce((s2, it) => s2 + (Number(it.qty) || 0), 0);
+
+      s.getRange(i + 1, itemsCol + 1).setValue(JSON.stringify(items));
+      s.getRange(i + 1, totalQtyCol + 1).setValue(activeTotal);
+      s.getRange(i + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
+
+      return {
+        ok: true,
+        newStock,
+        stockWarning: newStock !== null && newStock <= 0,
+        productName: items[idx].name
+      };
+    }
+    return { ok: false, error: '신청을 찾을 수 없습니다.' };
+  } finally {
+    lock.releaseLock();
   }
 }
 
