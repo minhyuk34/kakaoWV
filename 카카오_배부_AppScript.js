@@ -62,6 +62,7 @@ function doPost(e) {
     if      (action === 'register')      result = register(data);
     else if (action === 'login')         result = login(data);
     else if (action === 'submitRequest') result = submitRequest(data);
+    else if (action === 'mergeIntoRequest') result = mergeIntoRequest(data);
     else if (action === 'getRequests')   result = getRequests(data);
     else if (action === 'updateRequest') result = updateRequest(data);
     else if (action === 'updateRequestSchedule') result = updateRequestSchedule(data);
@@ -85,7 +86,7 @@ function doPost(e) {
     const REPORT_TRIGGER_ACTIONS = [
       'submitRequest', 'updateRequest', 'approveItems', 'distributeItems',
       'cancelRequest', 'cancelItems', 'confirmCancelItem', 'rejectCancelItem',
-      'updateRequestSchedule', 'updateItemQty'
+      'updateRequestSchedule', 'updateItemQty', 'mergeIntoRequest'
     ];
     if (action === 'generateReport') {
       // 프런트에서 수동 새로고침 요청 시 직접 호출 가능
@@ -186,7 +187,7 @@ function submitRequest_({ dept, team, name, contact, email, reason, pickupDate, 
   // 수취예정일/사용예정일 셀이 Date 타입으로 자동 변환되지 않도록 텍스트 서식 고정
   s.getRange(newRow, 9).setNumberFormat('@').setValue(formatDateOnly(pickupDate));
   s.getRange(newRow, 10).setNumberFormat('@').setValue(formatDateOnly(useDate));
-  items.forEach(item => deductStock(item.num, item.qty));
+  items.forEach(item => deductStock(item.num, item.qty, { reqId: id, name, reason: '신청 제출' }));
   return { ok: true, id };
 }
 
@@ -305,7 +306,7 @@ function updateRequest({ id, status, adminNote }) {
 
     // 반려 시 재고 복구
     if (status === 'rejected') {
-      items.forEach(item => restoreStock(item.num, item.qty));
+      items.forEach(item => restoreStock(item.num, item.qty, { reqId: id, name: rows[i][4], reason: '신청 반려' }));
     }
 
     // 이메일 발송
@@ -474,10 +475,39 @@ function syncStock() {
 }
 
 // ── 재고 차감 / 복구 ──────────────────────────────────────────
-function deductStock(num, qty)  { adjustStock(num, -qty); }
-function restoreStock(num, qty) { adjustStock(num, +qty); }
+function deductStock(num, qty, meta)  { adjustStock(num, -qty, meta); }
+function restoreStock(num, qty, meta) { adjustStock(num, +qty, meta); }
 
-function adjustStock(num, delta) {
+// ── 변경이력 기록 ────────────────────────────────────────────
+// 재고가 바뀌는 모든 지점(adjustStock/adjustStockAllowNegative)에서 공통으로 호출되어
+// "언제, 어떤 신청 때문에, 왜, 얼마나" 바뀌었는지 별도 시트에 남긴다.
+function logStockChange(meta, num, delta, afterQty) {
+  if (!meta) return; // 사유가 없는 호출(예: 테스트)은 기록하지 않음
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let s = ss.getSheetByName('변경이력');
+    if (!s) {
+      s = ss.insertSheet('변경이력');
+      s.appendRow(['일시', '제품번호', '신청ID', '신청인', '변경사유', '증감', '변경후재고']);
+      s.getRange(1, 1, 1, 7).setBackground('#3C1E1E').setFontColor('#FEE500').setFontWeight('bold');
+      s.setFrozenRows(1);
+      s.setColumnWidth(5, 220);
+    }
+    s.appendRow([
+      new Date().toLocaleString('ko-KR'),
+      String(num).padStart(3, '0'),
+      meta.reqId || '',
+      meta.name || '',
+      meta.reason || '',
+      (delta > 0 ? '+' : '') + delta,
+      afterQty
+    ]);
+  } catch (e) {
+    Logger.log('변경이력 기록 실패: ' + e.message);
+  }
+}
+
+function adjustStock(num, delta, meta) {
   const s = sheet(SHEET_STK);
   const rows = s.getDataRange().getValues();
   const paddedNum = String(num).padStart(3, '0');
@@ -490,7 +520,9 @@ function adjustStock(num, delta) {
         // 어긋나는 원인이 되므로 0으로 조용히 밀어넣지 않고 반드시 로그를 남긴다.
         Logger.log(`⚠️ 재고 음수 발생 방지: 제품 ${paddedNum} 현재 ${cur} + 변화량 ${delta} = ${next} → 0으로 조정. syncStock() 실행 권장.`);
       }
-      s.getRange(i + 1, 3).setValue(Math.max(0, next));
+      const finalVal = Math.max(0, next);
+      s.getRange(i + 1, 3).setValue(finalVal);
+      logStockChange(meta, paddedNum, delta, finalVal);
       return;
     }
   }
@@ -498,7 +530,7 @@ function adjustStock(num, delta) {
 
 // 관리자가 신청 수량을 직접 수정할 때 사용 — 재고 부족 상태를 감추지 않고
 // 음수(마이너스 표시)까지 그대로 반영해 실제 부족분을 화면에서 바로 알 수 있게 한다
-function adjustStockAllowNegative(num, delta) {
+function adjustStockAllowNegative(num, delta, meta) {
   const s = sheet(SHEET_STK);
   const rows = s.getDataRange().getValues();
   const paddedNum = String(num).padStart(3, '0');
@@ -507,16 +539,122 @@ function adjustStockAllowNegative(num, delta) {
       const cur = Number(rows[i][2]) || 0;
       const next = cur + delta;
       s.getRange(i + 1, 3).setValue(next);
+      logStockChange(meta, paddedNum, delta, next);
       return next;
     }
   }
   return null;
 }
 
+function currentStockOf(num) {
+  const paddedNum = String(num).padStart(3, '0');
+  const rows = sheet(SHEET_STK).getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).padStart(3, '0') === paddedNum) return Number(rows[i][2]) || 0;
+  }
+  return null;
+}
+
+// 관리자가 수량을 줄이면서 "다음에 배부"를 선택했을 때, 같은 신청인 앞으로
+// 작업일로부터 한 달 뒤 수취예정일/사용예정일을 가진 신청을 새로 만든다.
+function createFollowUpRequest({ dept, team, name, contact, email, originalReqId }, item) {
+  const s = sheet(SHEET_REQ);
+  const id = Date.now().toString();
+  const followUp = new Date();
+  followUp.setMonth(followUp.getMonth() + 1);
+  const dateStr = Utilities.formatDate(followUp, 'Asia/Seoul', 'yyyy-MM-dd');
+
+  const items = [{ num: item.num, name: item.name, qty: item.qty, price: item.price || 0 }];
+  const newRow = s.getLastRow() + 1;
+  s.appendRow([
+    id, new Date().toLocaleString('ko-KR'),
+    dept || '', team || '', name || '', contact || '', email || '',
+    `[자동생성] 수량조정 이월 (원신청 ${originalReqId})`,
+    dateStr, dateStr,
+    JSON.stringify(items), item.qty,
+    'pending', '', ''
+  ]);
+  s.getRange(newRow, 9).setNumberFormat('@').setValue(dateStr);
+  s.getRange(newRow, 10).setNumberFormat('@').setValue(dateStr);
+  deductStock(item.num, item.qty, {
+    reqId: id, name,
+    reason: `수량조정 이월 신청 생성(원신청 ${originalReqId}): ${item.name} +${item.qty}`
+  });
+  return id;
+}
+
+// ── 신청 병합 ────────────────────────────────────────────────
+// 수취예정일·사용예정일이 같은 기존 신청에 새 항목들을 합쳐 넣는다.
+function mergeIntoRequest({ existingId, items }) {
+  const stockResult = getStock();
+  const insufficient = [];
+  items.forEach(item => {
+    const num = String(item.num).padStart(3, '0');
+    const available = stockResult.stock[num]?.current ?? 0;
+    if (item.qty > available) {
+      insufficient.push(`${item.name} (신청 ${item.qty}개 / 잔여 ${available}개)`);
+    }
+  });
+  if (insufficient.length > 0) {
+    return { ok: false, error: '재고 부족으로 합칠 수 없습니다:\n' + insufficient.join('\n') };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = sheet(SHEET_REQ);
+    const rows = s.getDataRange().getValues();
+
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) !== String(existingId)) continue;
+
+      const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
+      if (isOld) return { ok: false, error: '구형 신청 건과는 합칠 수 없습니다.' };
+
+      const itemsCol = 10, totalQtyCol = 11, statusCol = 12, updatedCol = 13;
+      const status = String(rows[i][statusCol] || '');
+      if (status === 'cancelled' || status === 'rejected' || status === 'distributed') {
+        return { ok: false, error: '이미 처리 완료되었거나 취소된 신청과는 합칠 수 없습니다.' };
+      }
+
+      let existingItems = [];
+      try { existingItems = JSON.parse(rows[i][itemsCol] || '[]'); } catch (e) {}
+
+      items.forEach(newItem => {
+        const match = existingItems.find(it =>
+          String(it.num).padStart(3, '0') === String(newItem.num).padStart(3, '0') && !it.cancelled
+        );
+        if (match) {
+          match.qty = (Number(match.qty) || 0) + Number(newItem.qty);
+        } else {
+          existingItems.push({
+            num: newItem.num, name: newItem.name, qty: newItem.qty,
+            price: newItem.price || 0, detail: newItem.detail || ''
+          });
+        }
+      });
+
+      items.forEach(item => deductStock(item.num, item.qty, {
+        reqId: existingId, name: rows[i][4], reason: `신청 합치기: ${item.name} +${item.qty}`
+      }));
+
+      const activeTotal = existingItems.filter(it => !it.cancelled).reduce((s2, it) => s2 + (Number(it.qty) || 0), 0);
+      s.getRange(i + 1, itemsCol + 1).setValue(JSON.stringify(existingItems));
+      s.getRange(i + 1, totalQtyCol + 1).setValue(activeTotal);
+      s.getRange(i + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
+
+      return { ok: true, id: existingId };
+    }
+    return { ok: false, error: '기존 신청을 찾을 수 없습니다.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // ── 관리자 - 신청 항목 수량 직접 수정 ─────────────────────────
 // 수량이 줄면 그만큼 재고 복구, 늘면 그만큼 재고 추가 차감.
 // 결과 재고가 0 이하가 되면 stockWarning:true 로 알려 프런트에서 경고 팝업을 띄우게 한다.
-function updateItemQty({ id, idx, qty }) {
+function updateItemQty({ id, idx, qty, adminName, deferReduced }) {
   qty = Number(qty);
   if (isNaN(qty) || qty < 0) return { ok: false, error: '올바른 수량을 입력하세요.' };
 
@@ -542,7 +680,28 @@ function updateItemQty({ id, idx, qty }) {
 
       const oldQty = Number(items[idx].qty) || 0;
       const delta  = qty - oldQty; // 늘어난 만큼 재고 추가 차감(음수), 줄어든 만큼 재고 복구(양수)
-      const newStock = adjustStockAllowNegative(items[idx].num, -delta);
+      const productNum  = items[idx].num;
+      const productName = items[idx].name;
+      const productPrice= items[idx].price || 0;
+
+      let deferredReqId = null;
+      if (delta < 0 && deferReduced) {
+        // 줄어든 만큼 재고 복구 후, 같은 신청인 앞으로 한 달 뒤 신청을 새로 만들어 이월
+        const reducedAmt = -delta;
+        adjustStockAllowNegative(productNum, reducedAmt, {
+          reqId: id, name: rows[i][4],
+          reason: `수량 감소분 이월(${adminName || '관리자'}): ${productName} -${reducedAmt} → 다음 신청으로`
+        });
+        deferredReqId = createFollowUpRequest({
+          dept: rows[i][2], team: rows[i][3], name: rows[i][4],
+          contact: rows[i][5], email: rows[i][6], originalReqId: id
+        }, { num: productNum, name: productName, qty: reducedAmt, price: productPrice });
+      } else {
+        adjustStockAllowNegative(productNum, -delta, {
+          reqId: id, name: rows[i][4],
+          reason: `수량 수정(${adminName || '관리자'}): ${productName} ${oldQty}→${qty}`
+        });
+      }
 
       items[idx].qty = qty;
       const activeTotal = items.filter(it => !it.cancelled).reduce((s2, it) => s2 + (Number(it.qty) || 0), 0);
@@ -551,11 +710,13 @@ function updateItemQty({ id, idx, qty }) {
       s.getRange(i + 1, totalQtyCol + 1).setValue(activeTotal);
       s.getRange(i + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
 
+      const newStock = currentStockOf(productNum);
       return {
         ok: true,
         newStock,
         stockWarning: newStock !== null && newStock <= 0,
-        productName: items[idx].name
+        productName,
+        deferredReqId
       };
     }
     return { ok: false, error: '신청을 찾을 수 없습니다.' };
@@ -709,7 +870,7 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
       const willDistribute = distributedIndices.includes(idx);
       if (wasDistributed && !willDistribute) {
         // 이전에 배부됐는데 이번에 해제 → 복구
-        restoreStock(item.num, item.qty);
+        restoreStock(item.num, item.qty, { reqId: id, name: rows[i][4], reason: '배부 해제(재배정)' });
       }
       item.distributed = willDistribute;
       if (willDistribute) {
@@ -761,7 +922,7 @@ function cancelRequest({ id }) {
     // 재고 복구
     let items = [];
     try { items = JSON.parse(rows[i][itemsCol] || '[]'); } catch(e) {}
-    items.forEach(item => restoreStock(item.num, item.qty));
+    items.forEach(item => restoreStock(item.num, item.qty, { reqId: id, name: rows[i][4], reason: '신청 전체취소' }));
 
     s.getRange(i + 1, statusCol + 1).setValue('cancelled');
     s.getRange(i + 1, (isOld ? 11 : 13) + 1).setValue(new Date().toLocaleString('ko-KR'));
@@ -794,7 +955,7 @@ function cancelItems({ id, indices }) {
     indices.forEach(idx => {
       if (items[idx] && !items[idx].cancelled && !items[idx].distributed) {
         items[idx].cancelled = true;
-        restoreStock(items[idx].num, items[idx].qty);
+        restoreStock(items[idx].num, items[idx].qty, { reqId: id, name: rows[i][4], reason: '항목 취소(관리자)' });
       }
     });
 
@@ -868,7 +1029,7 @@ function confirmCancelItem({ id, idx }) {
     if (!items[idx]) return { ok: false, error: '항목을 찾을 수 없습니다.' };
 
     // 재고 복구 후 취소 확정
-    restoreStock(items[idx].num, items[idx].qty);
+    restoreStock(items[idx].num, items[idx].qty, { reqId: id, name: rows[i][4], reason: '취소 확정(관리자)' });
     items[idx].cancelled = true;
     delete items[idx].cancelRequested;
 

@@ -886,10 +886,27 @@ async function submitRequest() {
     return;
   }
 
+  // 같은 신청인이 수취예정일·사용예정일이 모두 같은 활성 신청을 이미 갖고 있으면 병합 여부를 확인
+  const existing = getRequests().find(r =>
+    (r.status === 'pending' || r.status === 'approved') &&
+    r.name === name &&
+    dateOnly(r.pickupDate) === pickupDate &&
+    dateOnly(r.useDate) === useDate
+  );
+  let wantMerge = false;
+  if (existing) {
+    wantMerge = confirm(
+      `수취예정일(${pickupDate})·사용예정일(${useDate})이 같은 기존 신청이 있습니다.\n\n` +
+      `확인: 기존 신청에 합치기\n취소: 별도 신청으로 진행`
+    );
+  }
+
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = '처리 중...';
   try {
-    const res = await api('submitRequest', { dept, team, name, contact, email, reason, pickupDate, useDate, items });
+    const res = wantMerge
+      ? await api('mergeIntoRequest', { existingId: existing.id, items })
+      : await api('submitRequest', { dept, team, name, contact, email, reason, pickupDate, useDate, items });
     if (!res.ok) {
       alert('⚠️ 배부요청 실패\n\n' + res.error + '\n\n최신 재고를 다시 불러옵니다.');
       await loadStockFromAPI();
@@ -1371,14 +1388,27 @@ async function saveItemQty(id, idx) {
   if (!input) return;
   const newQty = parseInt(input.value, 10);
   if (isNaN(newQty) || newQty < 0) { toast('❌ 올바른 수량을 입력하세요'); return; }
+
+  const r = getRequests().find(x => String(x.id) === String(id));
+  const oldQty = r?.items?.[idx]?.qty ?? newQty;
+  let deferReduced = false;
+  if (newQty < oldQty) {
+    const reduced = oldQty - newQty;
+    deferReduced = confirm(
+      `수량을 ${oldQty}개 → ${newQty}개로 줄입니다.\n\n` +
+      `줄어든 ${reduced}개를 한 달 뒤 같은 신청인 앞으로 다시 신청 등록(다음에 배부)할까요?\n\n` +
+      `확인: 다음에 배부 (한 달 뒤 신청 자동 생성)\n취소: 그냥 삭제 (재고만 복구)`
+    );
+  }
+
   try {
-    const res = await api('updateItemQty', { id, idx, qty: newQty });
+    const res = await api('updateItemQty', { id, idx, qty: newQty, adminName: currentUser?.name || '', deferReduced });
     if (!res.ok) { toast('❌ 저장 실패: ' + res.error); return; }
     if (res.stockWarning) {
       alert(`⚠️ 재고 부족 경고\n\n"${res.productName || ''}" 재고가 ${res.newStock}개가 되었습니다.\n재고 시트를 확인해주세요.`);
     }
     await loadRequestsFromAPI();
-    toast('✅ 수량 수정 완료');
+    toast(res.deferredReqId ? '✅ 수량 수정 완료 · 한 달 뒤 신청 자동 등록됨' : '✅ 수량 수정 완료');
     showDetail(id); renderAdmin(); updateStats();
   } catch(e) { toast('❌ 서버 오류: ' + e.message); }
 }
