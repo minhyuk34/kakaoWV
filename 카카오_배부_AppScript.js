@@ -748,20 +748,15 @@ function doPost(e) {
       'updateRequestSchedule', 'updateItemQty', 'mergeIntoRequest'
     ];
     if (action === 'generateReport') {
-      // 프런트에서 수동 새로고침 요청 시 직접 호출 가능
+      // 프런트에서 수동 새로고침 요청 시 직접 호출 가능 (이때는 바로 결과를 보여줘야 하므로 동기 실행)
       try { generateReport(); result = { ok: true }; }
       catch (reportErr) { result = { ok: false, error: reportErr.message }; }
     } else if (result && result.ok !== false && REPORT_TRIGGER_ACTIONS.includes(action)) {
-      try { generateReport(); }
-      catch (reportErr) {
-        Logger.log('generateReport 실패: ' + reportErr.message);
-        result._reportError = reportErr.message; // 화면에서 확인 가능하도록 원래 결과에 첨부
-      }
-      try { syncPickupCalendar(); }
-      catch (calErr) {
-        Logger.log('syncPickupCalendar 실패: ' + calErr.message);
-        result._calendarError = calErr.message;
-      }
+      // 배부현황 시트 재생성 + 캘린더 재동기화는 무거운 작업이라 매 요청마다 동기로 실행하면
+      // 사용자가 버튼 누를 때마다 느려짐. 응답은 즉시 돌려주고, 실제 갱신은 몇 초 뒤
+      // 백그라운드 트리거에서 처리한다 (연속 클릭 시에도 트리거 1개로 합쳐짐).
+      try { scheduleDeferredRefresh(); }
+      catch (schedErr) { Logger.log('지연 갱신 예약 실패: ' + schedErr.message); }
     }
   } catch(err) {
     result = { ok: false, error: err.message };
@@ -1509,7 +1504,7 @@ function approveItems({ id, indices }) {
 }
 
 // ── 항목별 배부 처리 ──────────────────────────────────────────
-function distributeItems({ id, distributedIndices, distributeDate, distributeMethod, dateMap, methodMap }) {
+function distributeItems({ id, distributedIndices, distributeDate, distributeMethod, dateMap, methodMap, qtyMap }) {
   const s = sheet(SHEET_REQ);
   const rows = s.getDataRange().getValues();
 
@@ -1525,11 +1520,13 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
 
     // 선택되지 않은 항목 → 재고 복구
     items.forEach((item, idx) => {
+      if (item.cancelled) return; // 취소된 항목은 배부 대상에서 제외 (프런트에서 체크박스 자체가 없지만 방어적으로 한 번 더 확인)
       const wasDistributed = item.distributed || false;
       const willDistribute = distributedIndices.includes(idx);
       if (wasDistributed && !willDistribute) {
-        // 이전에 배부됐는데 이번에 해제 → 복구
+        // 이전에 배부됐는데 이번에 해제 → 복구 (재고는 신청수량 기준으로 예약되므로 신청수량만큼 복구)
         restoreStock(item.num, item.qty, { reqId: id, name: rows[i][4], reason: '배부 해제(재배정)' });
+        delete item.distributedQty;
       }
       item.distributed = willDistribute;
       if (willDistribute) {
@@ -1538,6 +1535,12 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
         const m = (methodMap && methodMap[idx]) || distributeMethod || '';
         if (d) item.distributeDate   = d;
         if (m) item.distributeMethod = m;
+
+        // 실제 배부수량 기록 (신청내역과 별개로 표시용 — 재고 차감은 신청 시점에 이미 반영되어 있으므로 여기선 건드리지 않음)
+        let distQty = (qtyMap && qtyMap[idx] !== undefined) ? Number(qtyMap[idx]) : item.qty;
+        if (isNaN(distQty) || distQty < 0) distQty = item.qty;
+        if (distQty > item.qty) distQty = item.qty; // 신청수량을 초과할 수 없음
+        item.distributedQty = distQty;
       }
     });
 
@@ -1880,8 +1883,10 @@ function generateReport() {
   // 신청 데이터 읽기
   const reqRows = sheet(SHEET_REQ).getDataRange().getValues().slice(1);
 
-  // { "제품번호|제품명" : { "본부-팀(이름)" : qty } }
+  // { "제품번호|제품명" : { "본부-팀(이름)" : 신청qty } }
+  // pivotDist: 같은 키 구조로 "실제 배부된" 수량만 별도 집계 (신청내역과 실제배부내역 구분)
   const pivot = {};
+  const pivotDist = {};
   const colKeySet = new Set();
 
   reqRows.forEach(r => {
@@ -1906,6 +1911,12 @@ function generateReport() {
       if (!pivot[rowKey]) pivot[rowKey] = {};
       pivot[rowKey][colKey] = (pivot[rowKey][colKey] || 0) + Number(item.qty);
       colKeySet.add(colKey);
+
+      if (item.distributed) {
+        if (!pivotDist[rowKey]) pivotDist[rowKey] = {};
+        const dq = Number(item.distributedQty ?? item.qty);
+        pivotDist[rowKey][colKey] = (pivotDist[rowKey][colKey] || 0) + dq;
+      }
     });
   });
 
@@ -1913,8 +1924,8 @@ function generateReport() {
   const colKeys = Array.from(colKeySet).sort();
   const totalCols = colKeys.length;
 
-  // 헤더 행: [제품번호, 제품명, 총재고, 팀1, 팀2, ..., 배부합계, 잔여재고]
-  const headerRow = ['제품번호', '제품명', '총재고', ...colKeys, '배부합계', '잔여재고'];
+  // 헤더 행: [제품번호, 제품명, 총재고, 팀1(신청), 팀2(신청), ..., 신청합계, 실제배부합계, 잔여재고]
+  const headerRow = ['제품번호', '제품명', '총재고', ...colKeys, '신청합계', '실제배부합계', '잔여재고'];
   report.appendRow(headerRow);
 
   // 헤더 스타일
@@ -1926,8 +1937,8 @@ function generateReport() {
 
   // 총재고 열 헤더 색상 구분
   report.getRange(1, 3).setBackground('#5C3D3D').setFontColor('#FFFFFF');
-  // 배부합계/잔여재고 열 헤더 색상 구분
-  report.getRange(1, headerRow.length - 1, 1, 2).setBackground('#5C3D3D').setFontColor('#FFFFFF');
+  // 신청합계/실제배부합계/잔여재고 열 헤더 색상 구분
+  report.getRange(1, headerRow.length - 2, 1, 3).setBackground('#5C3D3D').setFontColor('#FFFFFF');
 
   // 재고 시트의 전체 제품을 기준으로 rowKeys 구성 (신청 없는 제품도 포함)
   const allProductKeys = sheet(SHEET_STK).getDataRange().getValues().slice(1)
@@ -1942,7 +1953,8 @@ function generateReport() {
   const dataRows = [];
   const colTotals = new Array(totalCols).fill(0);
   let grandOriginal = 0;
-  let grandDistributed = 0;
+  let grandRequested = 0;
+  let grandDistributedActual = 0;
 
   rowKeys.forEach(rowKey => {
     const [num, name] = rowKey.split('|');
@@ -1954,46 +1966,51 @@ function generateReport() {
       colTotals[ci] += q;
       return q;
     });
-    const rowTotal = qtys.reduce((a, b) => a + b, 0);
+    const rowTotal = qtys.reduce((a, b) => a + b, 0); // 신청합계
+    const distTotal = pivotDist[rowKey]
+      ? Object.values(pivotDist[rowKey]).reduce((a, b) => a + b, 0)
+      : 0; // 실제배부합계
     const remaining = original - rowTotal;
 
     grandOriginal += original;
-    grandDistributed += rowTotal;
+    grandRequested += rowTotal;
+    grandDistributedActual += distTotal;
 
-    dataRows.push([num, name, original, ...qtys, rowTotal, remaining]);
+    dataRows.push([num, name, original, ...qtys, rowTotal, distTotal, remaining]);
   });
 
   if (dataRows.length > 0) {
     report.getRange(2, 1, dataRows.length, headerRow.length).setValues(dataRows);
 
-    // 데이터 영역 줄무늬
-    for (let i = 0; i < dataRows.length; i++) {
-      const bg = i % 2 === 0 ? '#FFFFFF' : '#FFF9E6';
-      report.getRange(i + 2, 1, 1, headerRow.length).setBackground(bg);
-    }
-
-    // 총재고 열 강조 (연한 회색)
-    report.getRange(2, 3, dataRows.length, 1).setBackground('#F0F0F0').setFontWeight('bold');
-
-    // 배부합계 열 강조 (노란색)
-    const distCol = 3 + totalCols + 1;
-    report.getRange(2, distCol, dataRows.length, 1).setFontWeight('bold').setBackground('#FEE500');
-
-    // 잔여재고 열 강조 (연두색)
-    const remCol = headerRow.length;
-    report.getRange(2, remCol, dataRows.length, 1).setFontWeight('bold').setBackground('#E8F5E9');
-
-    // 잔여재고가 0이면 빨간색 표시
-    dataRows.forEach((row, i) => {
-      if (row[row.length - 1] <= 0) {
-        report.getRange(i + 2, remCol).setBackground('#FFCDD2').setFontColor('#C62828');
-      }
+    // 데이터 영역 줄무늬 — 행마다 개별 API 호출하지 않고 배경색 2차원 배열을 한 번에 적용
+    // (144개 행이면 개별 호출 144번 vs 일괄 호출 1번 — 체감 속도 차이가 큼)
+    const remCol      = headerRow.length;
+    const reqTotalCol = 3 + totalCols + 1;   // 신청합계
+    const distCol     = reqTotalCol + 1;     // 실제배부합계
+    const bgGrid = dataRows.map((row, i) => {
+      const stripe = i % 2 === 0 ? '#FFFFFF' : '#FFF9E6';
+      const rowBg = new Array(headerRow.length).fill(stripe);
+      rowBg[2] = '#F0F0F0';   // 총재고 열
+      rowBg[reqTotalCol - 1] = '#FEE500'; // 신청합계 열
+      rowBg[distCol - 1] = '#CCE5FF';     // 실제배부합계 열
+      rowBg[remCol - 1] = row[row.length - 1] <= 0 ? '#FFCDD2' : '#E8F5E9'; // 잔여재고 열
+      return rowBg;
     });
+    report.getRange(2, 1, dataRows.length, headerRow.length).setBackgrounds(bgGrid);
+
+    // 굵게 표시할 열(총재고/신청합계/실제배부합계/잔여재고)
+    report.getRange(2, 3, dataRows.length, 1).setFontWeight('bold');
+    report.getRange(2, reqTotalCol, dataRows.length, 1).setFontWeight('bold');
+    report.getRange(2, distCol, dataRows.length, 1).setFontWeight('bold');
+    report.getRange(2, remCol, dataRows.length, 1).setFontWeight('bold');
+
+    // 잔여재고 0 이하인 행만 글자색 빨간색으로 (배경은 위에서 이미 처리됨)
+    const remFontColors = dataRows.map(row => [row[row.length - 1] <= 0 ? '#C62828' : '#000000']);
+    report.getRange(2, remCol, dataRows.length, 1).setFontColors(remFontColors);
   }
 
   // 합계 행
-  const colTotalGrand = colTotals.reduce((a, b) => a + b, 0);
-  const totalRow = ['', '합계', grandOriginal, ...colTotals, grandDistributed, grandOriginal - grandDistributed];
+  const totalRow = ['', '합계', grandOriginal, ...colTotals, grandRequested, grandDistributedActual, grandOriginal - grandRequested];
   const totalRowIdx = dataRows.length + 2;
   report.appendRow(totalRow);
   report.getRange(totalRowIdx, 1, 1, headerRow.length)
@@ -2182,6 +2199,29 @@ function sendResultReportReminders() {
   });
 
   Logger.log(`결과보고 등록 요청 메일 발송 완료: ${targets.length}건`);
+}
+
+// ── 배부현황/캘린더 지연 갱신 (요청 처리 속도 개선용) ───────────
+// 매 액션마다 무거운 재생성을 동기로 돌리면 버튼 클릭이 매번 느려지므로,
+// "몇 초 뒤 한 번만 갱신"을 예약해서 실제 작업은 백그라운드에서 처리한다.
+// 연속으로 여러 액션이 들어와도 기존 예약을 지우고 다시 잡기 때문에 트리거가 쌓이지 않는다.
+function scheduleDeferredRefresh() {
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === 'runDeferredRefresh')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('runDeferredRefresh')
+    .timeBased()
+    .after(5000) // 5초 뒤 1회 실행
+    .create();
+}
+
+function runDeferredRefresh() {
+  // 1회성 트리거이므로 실행 후 스스로 정리
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === 'runDeferredRefresh')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  try { generateReport(); } catch (e) { Logger.log('지연 배부현황 갱신 실패: ' + e.message); }
+  try { syncPickupCalendar(); } catch (e) { Logger.log('지연 캘린더 갱신 실패: ' + e.message); }
 }
 
 // ── Apps Script 편집기에서 1회만 실행: 매주 월요일 오전 9시 트리거 등록 ──
