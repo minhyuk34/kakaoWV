@@ -681,6 +681,7 @@ function onOpen() {
     .addItem('[테스트] 장민혁님께 결과보고 안내 메일 발송', 'testSendReportEmailToJangMinhyuk')
     .addSeparator()
     .addItem('갇힌 신청건 상태 일괄 수정(일부취소+나머지배부완료)', 'fixStuckApprovedStatuses')
+    .addItem('레거시 배부완료 건 실제배부수량 보정', 'fixLegacyDistributedItems')
     .addToUi();
 }
 
@@ -715,6 +716,46 @@ function fixStuckApprovedStatuses() {
   Logger.log(`갇힌 신청건 상태 보정 완료: ${fixedCount}건`);
   try { SpreadsheetApp.getUi().alert(`${fixedCount}건을 배부완료 상태로 보정했습니다.`); } catch (e) {}
   if (fixedCount > 0) { try { generateReport(); } catch (e) {} }
+}
+
+// ── 레거시 데이터 보정: status=distributed인데 항목에 distributed 플래그/실제배부수량이
+// 없는 경우(실제배부수량 기능이 생기기 전에 처리된 건) 신청수량 그대로 받은 것으로 간주해 채워넣는다
+function fixLegacyDistributedItems() {
+  const s = sheet(SHEET_REQ);
+  const rows = s.getDataRange().getValues();
+  let fixedRows = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    if (!rows[i][0]) continue;
+    const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
+    if (isOld) continue;
+
+    const itemsCol = 10, statusCol = 12;
+    const status = String(rows[i][statusCol] || '');
+    if (status !== 'distributed') continue;
+
+    let items = [];
+    try { items = JSON.parse(rows[i][itemsCol] || '[]'); } catch (e) { continue; }
+
+    let changed = false;
+    items.forEach(item => {
+      if (item.cancelled) return;
+      if (!item.distributed) { item.distributed = true; changed = true; }
+      if (item.distributedQty === undefined || item.distributedQty === null) {
+        item.distributedQty = item.qty;
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      s.getRange(i + 1, itemsCol + 1).setValue(JSON.stringify(items));
+      fixedRows++;
+    }
+  }
+
+  Logger.log(`레거시 배부완료 항목 보정 완료: ${fixedRows}건`);
+  try { SpreadsheetApp.getUi().alert(`${fixedRows}건의 배부완료 신청에서 실제배부수량을 신청수량 기준으로 채워넣었습니다.`); } catch (e) {}
+  if (fixedRows > 0) { try { generateReport(); } catch (e) {} }
 }
 
 // ── 시트 초기화 (최초 1회 실행) ──────────────────────────────

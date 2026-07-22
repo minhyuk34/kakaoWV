@@ -675,6 +675,16 @@ async function enterSystem(user) {
   updateCartBadge(); updateStats();
   startAutoRefresh();
   showPage(user.role==='admin' ? 'admin' : 'catalog');
+  notifyPendingReportsIfAny();
+}
+// 로그인한 본인 명의로 배부완료됐지만 아직 결과보고를 등록하지 않은 건이 있으면 안내
+function notifyPendingReportsIfAny() {
+  const needed = getRequests().filter(r =>
+    r.name === currentUser?.name && r.status === 'distributed' && !hasReportSubmitted(r)
+  );
+  if (needed.length > 0) {
+    alert(`📎 결과보고가 필요합니다\n\n등록하지 않은 결과보고가 ${needed.length}건 있습니다.\n"내 역" 메뉴에서 확인 후 등록해주세요.`);
+  }
 }
 function doLogout() {
   currentUser=null; sessionStorage.removeItem('currentUser'); cart={};
@@ -982,7 +992,9 @@ function renderMyRequests() {
         <div><span style="color:var(--muted)">팀</span> <b>${r.team||'-'}</b></div>
         <div><span style="color:var(--muted)">이름</span> <b>${r.name||'-'}</b></div>
         <div><span style="color:var(--muted)">연락처</span> <b>${r.contact||'-'}</b></div>
-        <div style="grid-column:2/-1"><span style="color:var(--muted)">사용처</span> <b>${r.reason||'-'}</b></div>
+        <div><span style="color:var(--muted)">수취예정일</span> <b>${dateOnly(r.pickupDate)||'-'}</b></div>
+        <div><span style="color:var(--muted)">사용예정일</span> <b>${dateOnly(r.useDate)||'-'}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--muted)">사용처</span> <b>${r.reason||'-'}</b></div>
       </div>
       ${r.adminNote?`<div style="font-size:12px;background:#FFF3CD;padding:6px 10px;border-radius:6px;margin-bottom:10px">💬 관리자: ${r.adminNote}</div>`:''}
       ${r.status==='distributed'?`<div style="margin-bottom:10px"><button onclick="showReportUpload('${r.id}')" style="background:var(--blue);color:#fff;border:none;border-radius:7px;padding:7px 16px;font-size:13px;font-weight:700;cursor:pointer">📎 결과보고서 등록</button></div>`:''}
