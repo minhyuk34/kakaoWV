@@ -678,7 +678,42 @@ function onOpen() {
     .addItem('수취일정 캘린더 지금 동기화', 'syncPickupCalendar')
     .addSeparator()
     .addItem('결과보고 요청 메일 지금 발송', 'sendResultReportReminders')
+    .addSeparator()
+    .addItem('갇힌 신청건 상태 일괄 수정(일부취소+나머지배부완료)', 'fixStuckApprovedStatuses')
     .addToUi();
+}
+
+// ── 일부 항목만 취소되고 나머지가 전부 배부완료됐는데도 상태가 "승인됨"에
+// 갇혀있던 과거 데이터를 일괄 보정 (distributeItems의 이전 버그로 인한 데이터)
+function fixStuckApprovedStatuses() {
+  const s = sheet(SHEET_REQ);
+  const rows = s.getDataRange().getValues();
+  let fixedCount = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    if (!rows[i][0]) continue;
+    const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
+    if (isOld) continue; // 구형 행은 대상 아님
+
+    const itemsCol = 10, statusCol = 12, updatedCol = 13;
+    const status = String(rows[i][statusCol] || '');
+    if (status !== 'approved') continue;
+
+    let items = [];
+    try { items = JSON.parse(rows[i][itemsCol] || '[]'); } catch (e) { continue; }
+
+    const active = items.filter(item => !item.cancelled);
+    const allDone = active.length > 0 && active.every(item => item.distributed);
+    if (!allDone) continue;
+
+    s.getRange(i + 1, statusCol + 1).setValue('distributed');
+    s.getRange(i + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
+    fixedCount++;
+  }
+
+  Logger.log(`갇힌 신청건 상태 보정 완료: ${fixedCount}건`);
+  try { SpreadsheetApp.getUi().alert(`${fixedCount}건을 배부완료 상태로 보정했습니다.`); } catch (e) {}
+  if (fixedCount > 0) { try { generateReport(); } catch (e) {} }
 }
 
 // ── 시트 초기화 (최초 1회 실행) ──────────────────────────────
@@ -1544,8 +1579,10 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
       }
     });
 
-    // 전체 배부됐으면 status=distributed, 일부만이면 status=approved 유지
-    const allDone = items.every(item => item.distributed);
+    // 취소되지 않은 항목이 전부 배부됐으면 status=distributed, 일부만이면 approved 유지
+    // (취소된 항목은 distributed가 될 수 없으므로 반드시 제외하고 판단해야 함)
+    const activeForDist = items.filter(item => !item.cancelled);
+    const allDone = activeForDist.length > 0 && activeForDist.every(item => item.distributed);
     const newStatus = allDone ? 'distributed' : 'approved';
 
     s.getRange(i + 1, itemsCol + 1).setValue(JSON.stringify(items));

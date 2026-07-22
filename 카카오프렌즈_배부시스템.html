@@ -1226,16 +1226,52 @@ function renderAdminInventory() {
   </tr>
   </tbody></table>`;
 }
+// 결과보고서/명단 링크가 관리자메모에 저장되어 있으면 결과보고 완료로 간주
+function hasReportSubmitted(r) {
+  const note = String(r.adminNote || '');
+  return note.includes('보고서:') || note.includes('명단:');
+}
+function historyCategory(r) {
+  if (r.status === 'distributed') return hasReportSubmitted(r) ? 'reported' : 'distributed';
+  if (r.status === 'cancelled')   return 'cancelled';
+  if (r.status === 'rejected')    return 'rejected';
+  return null;
+}
+const HISTORY_CATEGORY_LABEL = {
+  distributed: '배부완료', reported: '결과보고완료', cancelled: '취소', rejected: '반려'
+};
+// 기본은 배부완료/결과보고완료만 노출 — 취소/반려는 필터를 켜야 보임
+let adminHistoryFilters = new Set(['distributed', 'reported']);
+function toggleHistoryFilter(cat) {
+  if (adminHistoryFilters.has(cat)) adminHistoryFilters.delete(cat);
+  else adminHistoryFilters.add(cat);
+  renderAdminHistory();
+}
 function renderAdminHistory() {
-  const reqs=getRequests().filter(r=>r.status==='distributed'||r.status==='rejected'||r.status==='cancelled');
+  const all = getRequests().filter(r=>r.status==='distributed'||r.status==='rejected'||r.status==='cancelled');
+  const counts = { distributed:0, reported:0, cancelled:0, rejected:0 };
+  all.forEach(r => { const c = historyCategory(r); if (c) counts[c]++; });
+
+  const reqs = all.filter(r => adminHistoryFilters.has(historyCategory(r)));
   const el=document.getElementById('admin-history');
-  if (reqs.length===0){el.innerHTML='<div class="empty"><div class="emoji">📦</div><p>배부/반려/취소 이력이 없습니다</p></div>';return;}
-  el.innerHTML=`<table><thead><tr><th>처리 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>신청내역</th><th>실제배부내역</th><th>상태</th></tr></thead>
+
+  const filterBar = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+    ${Object.keys(HISTORY_CATEGORY_LABEL).map(cat => {
+      const active = adminHistoryFilters.has(cat);
+      return `<button onclick="toggleHistoryFilter('${cat}')" style="padding:6px 14px;border-radius:20px;border:1.5px solid ${active?'var(--kakao)':'var(--border)'};background:${active?'var(--kakao)':'#fff'};color:${active?'var(--brown)':'var(--muted)'};font-size:12px;font-weight:700;cursor:pointer">${HISTORY_CATEGORY_LABEL[cat]} (${counts[cat]})</button>`;
+    }).join('')}
+  </div>`;
+
+  if (all.length===0){el.innerHTML=filterBar+'<div class="empty"><div class="emoji">📦</div><p>배부/반려/취소 이력이 없습니다</p></div>';return;}
+  if (reqs.length===0){el.innerHTML=filterBar+'<div class="empty"><div class="emoji">🔍</div><p>선택된 필터에 해당하는 이력이 없습니다</p></div>';return;}
+
+  el.innerHTML=filterBar+`<table><thead><tr><th>처리 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>신청내역</th><th>실제배부내역</th><th>상태</th></tr></thead>
   <tbody>${reqs.map(r=>{
     const active = r.items.filter(i=>!i.cancelled);
     const reqQty = active.reduce((s,i)=>s+i.qty,0);
     const distActive = active.filter(i=>i.distributed);
     const distQty = distActive.reduce((s,i)=>s+(i.distributedQty ?? i.qty),0);
+    const cat = historyCategory(r);
     return `<tr>
     <td style="font-size:12px">${r.updatedAt||r.createdAt}</td>
     <td><b>${r.dept||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
@@ -1244,8 +1280,8 @@ function renderAdminHistory() {
     <td><a href="#" onclick="showDetail('${r.id}')" style="color:var(--blue)">${active.length}종 ${reqQty.toLocaleString()}개 ▶</a></td>
     <td>${r.status==='distributed' ? `<b style="color:var(--green)">${distActive.length}종 ${distQty.toLocaleString()}개</b>` : '-'}</td>
     <td>
-        <span class="status-badge ${r.status}">${statusLabel(r.status)}</span>
-        ${r.status==='distributed'?`<br><button onclick="showReportUpload('${r.id}')" style="margin-top:4px;background:var(--blue);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">📎 결과보고</button>`:''}
+        <span class="status-badge ${r.status}">${cat==='reported'?'결과보고완료':statusLabel(r.status)}</span>
+        ${r.status==='distributed'?`<br><button onclick="showReportUpload('${r.id}')" style="margin-top:4px;background:var(--blue);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">📎 결과보고${cat==='reported'?' 수정':''}</button>`:''}
       </td>
   </tr>`;
   }).join('')}</tbody></table>`;
@@ -1311,8 +1347,9 @@ function showDetail(id) {
       actionBtn = `<button onclick="approveItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:none;border-radius:5px;background:var(--green);color:#fff;cursor:pointer;white-space:nowrap">✓ 승인</button>
         <button onclick="cancelItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#888;cursor:pointer;white-space:nowrap;margin-left:3px">✕ 취소</button>`;
     } else if (isAdmin && isApproved && !distributed && !cancelRequested) {
-      actionBtn = `<button onclick="openDistributeItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:none;border-radius:5px;background:var(--blue);color:#fff;cursor:pointer;white-space:nowrap">📦 배부</button>
-        <button onclick="cancelItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#888;cursor:pointer;white-space:nowrap;margin-left:3px">✕ 취소</button>`;
+      // 배부 실행은 신청상세에서 하지 않고 하단의 "📦 배부 처리하기" 버튼(항목별 배부처리 화면)에서
+      // 한 번에 처리하도록 일원화 — 여기서는 검토/취소만
+      actionBtn = `<button onclick="cancelItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#888;cursor:pointer;white-space:nowrap">✕ 취소</button>`;
     }
 
     const canEditQty = isAdmin && !isCancelled && !distributed;
@@ -1345,16 +1382,8 @@ function showDetail(id) {
   },0);
   const totalQty = activeItems.reduce((s,i)=>s+i.qty,0);
 
-  // 배부 날짜/방법 입력 (승인됨 상태 관리자만)
-  const distributeFields = (isAdmin && isApproved) ? `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;padding:10px;background:#F0F4FF;border-radius:8px">
-      <div><label style="font-size:11px;font-weight:700;color:var(--muted)">배부 날짜</label>
-        <input id="dist-date-all" type="date" style="width:100%;margin-top:4px;padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;outline:none">
-      </div>
-      <div><label style="font-size:11px;font-weight:700;color:var(--muted)">배부 방법</label>
-        <input id="dist-method-all" type="text" placeholder="예: 직접전달, 택배" style="width:100%;margin-top:4px;padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;outline:none">
-      </div>
-    </div>` : '';
+  // 배부 실행은 별도 화면(항목별 배부처리)에서 일괄 처리 — 신청상세에는 진입 버튼만 둔다
+  const distributeFields = '';
 
   // 전체 액션 버튼
   let bulkBtns = '';
@@ -1366,7 +1395,7 @@ function showDetail(id) {
     </div>`;
   } else if (isAdmin && isApproved) {
     bulkBtns = `<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
-      <button onclick="distributeAllItems('${id}')" style="width:100%;padding:11px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px;font-weight:700;cursor:pointer">📦 전체 배부완료</button>
+      <button onclick="showDistributeModal('${id}')" style="width:100%;padding:11px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px;font-weight:700;cursor:pointer">📦 배부 처리하기</button>
       <button onclick="cancelAllItems('${id}')" style="width:100%;padding:10px;border:1.5px solid var(--red);border-radius:8px;background:#fff;color:var(--red);font-size:13px;font-weight:700;cursor:pointer">🚫 전체취소</button>
     </div>`;
   }
@@ -1460,30 +1489,6 @@ async function approveAllItems(id) {
   } catch(e) { toast('❌ 서버 오류: ' + e.message); }
 }
 
-// ── 항목별 배부 ──
-function openDistributeItem(id, idx) {
-  const date   = document.getElementById('dist-date-all')?.value   || '';
-  const method = document.getElementById('dist-method-all')?.value || '';
-  distributeItems_(id, [idx], date, method);
-}
-async function distributeAllItems(id) {
-  const r = getRequests().find(x => String(x.id) === String(id));
-  if (!r) return;
-  const date   = document.getElementById('dist-date-all')?.value   || '';
-  const method = document.getElementById('dist-method-all')?.value || '';
-  const indices = r.items.map((_,i) => i);
-  await distributeItems_(id, indices, date, method);
-  closeModal();
-}
-async function distributeItems_(id, indices, date, method) {
-  try {
-    const res = await api('distributeItems', { id, distributedIndices: indices, distributeDate: date, distributeMethod: method });
-    if (!res.ok) { toast('❌ ' + res.error); return; }
-    await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
-    toast(`📦 ${indices.length}개 항목 배부완료`);
-    showDetail(id); renderAdmin(); updateStats();
-  } catch(e) { toast('❌ 서버 오류: ' + e.message); }
-}
 // ── 피드백 ────────────────────────────────────────────────────
 let _feedbackRating = 0;
 let _feedbackCategory = '';
