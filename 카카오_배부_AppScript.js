@@ -678,6 +678,7 @@ function onOpen() {
     .addItem('수취일정 캘린더 지금 동기화', 'syncPickupCalendar')
     .addSeparator()
     .addItem('결과보고 요청 메일 지금 발송', 'sendResultReportReminders')
+    .addItem('[테스트] 장민혁님께 결과보고 안내 메일 발송', 'testSendReportEmailToJangMinhyuk')
     .addSeparator()
     .addItem('갇힌 신청건 상태 일괄 수정(일부취소+나머지배부완료)', 'fixStuckApprovedStatuses')
     .addToUi();
@@ -1581,6 +1582,7 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
 
     // 취소되지 않은 항목이 전부 배부됐으면 status=distributed, 일부만이면 approved 유지
     // (취소된 항목은 distributed가 될 수 없으므로 반드시 제외하고 판단해야 함)
+    const prevStatus = String(rows[i][statusCol] || '');
     const activeForDist = items.filter(item => !item.cancelled);
     const allDone = activeForDist.length > 0 && activeForDist.every(item => item.distributed);
     const newStatus = allDone ? 'distributed' : 'approved';
@@ -1594,6 +1596,16 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
       const recipientEmail = rows[i][6];
       if (recipientEmail) {
         sendNotificationEmail(recipientEmail, rows[i][4], rows[i][2], rows[i][3], rows[i][7], items, 'distributed', '');
+      }
+      // 방금 막 배부완료로 전환된 경우(이미 배부완료 상태였던 걸 재저장한 게 아닌 경우)에만
+      // 결과보고 등록 안내 메일을 즉시 발송 — 매번 다시 보내지 않도록 상태 전환 시점에만 트리거
+      if (prevStatus !== 'distributed' && recipientEmail) {
+        try {
+          sendResultReportRequestEmail({
+            email: recipientEmail, name: rows[i][4], reason: rows[i][7],
+            useDate: formatDateOnly(rows[i][9])
+          }, 'immediate');
+        } catch (e) { Logger.log('결과보고 즉시안내 메일 발송 실패: ' + e.message); }
       }
     }
 
@@ -2166,6 +2178,57 @@ function sendUpcomingPickupReminder() {
 
 // ── 사용예정일 다음날, 배부완료된 신청인에게 결과보고 등록 요청 메일 발송 ──
 // 매일 실행되며, "사용예정일이 어제였던" 배부완료 건 중 아직 결과보고를 등록하지 않은 건만 대상으로 한다.
+// ── 결과보고 샘플 파일 첨부용 Blob 생성 (여러 함수에서 공용으로 사용) ──
+function buildReportSampleBlobs() {
+  const docBlob  = Utilities.newBlob(Utilities.base64Decode(SAMPLE_REPORT_DOC_B64),
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation', SAMPLE_REPORT_DOC_NAME);
+  const listBlob = Utilities.newBlob(Utilities.base64Decode(SAMPLE_REPORT_LIST_B64),
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', SAMPLE_REPORT_LIST_NAME);
+  return { docBlob, listBlob };
+}
+
+// ── 결과보고 등록 안내 메일 (공용) ──────────────────────────────
+// variant: 'immediate' = 배부완료 직후 즉시 발송 / 'reminder' = 사용예정일 다음날 리마인더
+function sendResultReportRequestEmail(t, variant) {
+  const { docBlob, listBlob } = buildReportSampleBlobs();
+  const isReminder = variant === 'reminder';
+
+  const intro = isReminder
+    ? `신청하신 <b>"${t.reason || '-'}"</b> 건의 카카오프렌즈 GIK 물품이 배부 완료되어, 사용예정일(${t.useDate || '-'})이 지났습니다.`
+    : `신청하신 <b>"${t.reason || '-'}"</b> 건의 카카오프렌즈 GIK 물품 배부가 완료되었습니다${t.useDate ? ` (사용예정일: ${t.useDate})` : ''}.`;
+
+  const footer = isReminder
+    ? '사용예정일 다음날 자동 발송되는 메일입니다. 이미 등록하셨다면 무시해주세요.'
+    : '배부완료 처리 시 자동 발송되는 안내 메일입니다. 물품 사용 후 결과보고를 등록해주세요.';
+
+  const html = `
+    <div style="font-family:sans-serif; line-height:1.7">
+      <h2>📎 결과보고 등록 ${isReminder ? '요청드립니다' : '안내드립니다'}</h2>
+      <p>안녕하세요, ${t.name}님.<br>${intro}</p>
+      <p>아래 방법으로 <b>결과보고</b>를 등록해주세요.</p>
+      <div style="background:#F7F5F2; border-left:4px solid #FEE500; border-radius:8px; padding:14px 18px; margin:16px 0">
+        <b>등록 방법</b>
+        <ol style="margin:8px 0 0; padding-left:20px">
+          <li>카카오프렌즈 GIK배분시스템에 로그인</li>
+          <li>상단 메뉴 "내 역"(주문내역) 클릭</li>
+          <li>해당 신청 건의 <b>"📎 결과보고서 등록"</b> 버튼 클릭</li>
+          <li><b>배부 명단 파일</b>(누구에게 몇 개씩 나눠줬는지)과 <b>결과보고서 파일</b>을 첨부 후 업로드</li>
+        </ol>
+      </div>
+      <p>양식이 처음이시면 이 메일에 첨부된 샘플 파일(배분리스트, 결과보고양식)을 참고해서 작성하시면 됩니다.</p>
+      <p style="color:#888; font-size:12px; margin-top:20px">${footer}</p>
+    </div>
+  `;
+  MailApp.sendEmail({
+    to: t.email,
+    subject: `[카카오프렌즈 GIK] "${t.reason || '신청'}" 건 결과보고 등록 ${isReminder ? '요청' : '안내'}`,
+    htmlBody: html,
+    attachments: [docBlob, listBlob]
+  });
+}
+
+// ── 사용예정일 다음날, 아직 결과보고 미등록인 배부완료 건에게 리마인더 발송 ──
+// (배부완료 직후 즉시안내 메일은 distributeItems에서 별도로 발송됨 — 이건 놓친 사람을 위한 후속 리마인더)
 function sendResultReportReminders() {
   const rows = sheet(SHEET_REQ).getDataRange().getValues().slice(1);
 
@@ -2193,7 +2256,7 @@ function sendResultReportReminders() {
     const email = r[6];
     if (!email) return;
 
-    targets.push({ id: r[0], name: r[4], dept: r[2], team: r[3], reason: r[7], email });
+    targets.push({ id: r[0], name: r[4], dept: r[2], team: r[3], reason: r[7], email, useDate: yesterdayStr });
   });
 
   if (targets.length === 0) {
@@ -2201,41 +2264,33 @@ function sendResultReportReminders() {
     return;
   }
 
-  const docBlob  = Utilities.newBlob(Utilities.base64Decode(SAMPLE_REPORT_DOC_B64),
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation', SAMPLE_REPORT_DOC_NAME);
-  const listBlob = Utilities.newBlob(Utilities.base64Decode(SAMPLE_REPORT_LIST_B64),
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', SAMPLE_REPORT_LIST_NAME);
+  targets.forEach(t => sendResultReportRequestEmail(t, 'reminder'));
+  Logger.log(`결과보고 등록 리마인더 메일 발송 완료: ${targets.length}건`);
+}
 
-  targets.forEach(t => {
-    const html = `
-      <div style="font-family:sans-serif; line-height:1.7">
-        <h2>📎 결과보고 등록을 요청드립니다</h2>
-        <p>안녕하세요, ${t.name}님.<br>
-        신청하신 <b>"${t.reason || '-'}"</b> 건의 카카오프렌즈 GIK 물품이 배부 완료되어,
-        사용예정일(${yesterdayStr})이 지났습니다.</p>
-        <p>아래 방법으로 <b>결과보고</b>를 등록해주세요.</p>
-        <div style="background:#F7F5F2; border-left:4px solid #FEE500; border-radius:8px; padding:14px 18px; margin:16px 0">
-          <b>등록 방법</b>
-          <ol style="margin:8px 0 0; padding-left:20px">
-            <li>카카오프렌즈 GIK배분시스템에 로그인</li>
-            <li>상단 메뉴 "내 역"(주문내역) 클릭</li>
-            <li>해당 신청 건의 <b>"📎 결과보고서 등록"</b> 버튼 클릭</li>
-            <li><b>배부 명단 파일</b>(누구에게 몇 개씩 나눠줬는지)과 <b>결과보고서 파일</b>을 첨부 후 업로드</li>
-          </ol>
-        </div>
-        <p>양식이 처음이시면 이 메일에 첨부된 샘플 파일(배분리스트, 결과보고양식)을 참고해서 작성하시면 됩니다.</p>
-        <p style="color:#888; font-size:12px; margin-top:20px">사용예정일 다음날 자동 발송되는 메일입니다. 이미 등록하셨다면 무시해주세요.</p>
-      </div>
-    `;
-    MailApp.sendEmail({
-      to: t.email,
-      subject: `[카카오프렌즈 GIK] "${t.reason || '신청'}" 건 결과보고 등록 요청`,
-      htmlBody: html,
-      attachments: [docBlob, listBlob]
-    });
-  });
+// ── Apps Script 편집기/메뉴에서 1회 테스트: 장민혁님의 배부완료 건에 결과보고 안내 메일 발송 ──
+function testSendReportEmailToJangMinhyuk() {
+  const rows = sheet(SHEET_REQ).getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (!rows[i][0]) continue;
+    const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
+    if (isOld) continue;
+    const name   = String(rows[i][4] || '');
+    const status = String(rows[i][12] || '');
+    if (name !== '장민혁' || status !== 'distributed') continue;
 
-  Logger.log(`결과보고 등록 요청 메일 발송 완료: ${targets.length}건`);
+    const email = rows[i][6];
+    if (!email) { Logger.log('장민혁님 신청 건에 이메일이 없습니다.'); return; }
+
+    sendResultReportRequestEmail({
+      email, name, reason: rows[i][7], useDate: formatDateOnly(rows[i][9])
+    }, 'immediate');
+    Logger.log(`테스트 메일 발송 완료: ${email}`);
+    try { SpreadsheetApp.getUi().alert(`장민혁님(${email})께 테스트 메일을 발송했습니다.`); } catch (e) {}
+    return;
+  }
+  Logger.log('장민혁님의 배부완료 상태 신청 건을 찾지 못했습니다.');
+  try { SpreadsheetApp.getUi().alert('장민혁님의 배부완료 상태 신청 건을 찾지 못했습니다.'); } catch (e) {}
 }
 
 // ── 배부현황/캘린더 지연 갱신 (요청 처리 속도 개선용) ───────────
