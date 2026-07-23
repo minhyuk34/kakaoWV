@@ -974,6 +974,15 @@ function getRequests({ name, role }) {
       Logger.log(`⚠️ 신청 행 형식 인식 실패 (제품 목록 JSON 없음) — ID:${r[0]}, 이름:${r[4]}. 시트에서 직접 입력된 행인지 확인 필요.`);
     }
 
+    // status가 다섯 가지 정상값(pending/approved/distributed/rejected/cancelled) 중
+    // 어느 것도 아니면(셀 손상·공백 등) 신청관리/배부이력 어느 탭에도 안 걸려 조용히
+    // 사라지므로, 반드시 pending으로 되돌려 관리자 화면에 다시 노출시킨다.
+    const KNOWN_STATUSES = ['pending', 'approved', 'distributed', 'rejected', 'cancelled'];
+    if (!KNOWN_STATUSES.includes(status)) {
+      Logger.log(`⚠️ 알 수 없는 상태값 감지 — ID:${r[0]}, 이름:${r[4]}, 상태:"${status}" → pending으로 노출`);
+      status = 'pending';
+    }
+
     let items = [];
     try { items = JSON.parse(itemsJson || '[]'); } catch(e) { items = []; }
 
