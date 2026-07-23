@@ -671,6 +671,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('배부현황')
     .addItem('지금 새로고침', 'generateReport')
+    .addItem('재고 강제 재계산', 'forceSyncStockFromMenu')
     .addSeparator()
     .addItem('수취예정 리마인더 지금 발송', 'sendUpcomingPickupReminder')
     .addItem('수취예정 리마인더 매주 월요일 자동발송 등록', 'setupWeeklyPickupReminderTrigger')
@@ -1220,6 +1221,13 @@ function syncStock() {
     s.getRange(i + 1, 5).setValue(used);     // E열: 배분수량
   }
   return { ok: true, msg: '재고 재계산 완료' };
+}
+
+// 구글시트 메뉴에서 즉시 재고를 재계산할 때 사용 (반품 등 처리 후 자동 새로고침을
+// 기다리지 않고 바로 확인하고 싶을 때)
+function forceSyncStockFromMenu() {
+  const result = syncStock();
+  try { SpreadsheetApp.getUi().alert(result.msg || '재고 재계산 완료'); } catch (e) {}
 }
 
 // ── 재고 차감 / 복구 ──────────────────────────────────────────
@@ -2247,6 +2255,7 @@ function generateReport() {
   let grandOriginal = 0;
   let grandRequested = 0;
   let grandDistributedActual = 0;
+  let grandCurrent = 0;
 
   rowKeys.forEach(rowKey => {
     const [num, name] = rowKey.split('|');
@@ -2262,11 +2271,15 @@ function generateReport() {
     const distTotal = pivotDist[rowKey]
       ? Object.values(pivotDist[rowKey]).reduce((a, b) => a + b, 0)
       : 0; // 실제배부합계
-    const remaining = original - rowTotal;
+    // 잔여재고는 "원래재고 - 신청합계"로 역산하지 않고 재고 시트의 실제 값을 그대로 쓴다.
+    // (역산 방식은 반품·관리자 수동조정 등 신청수량과 별개로 일어나는 재고 변동을
+    // 전혀 반영하지 못해 관리자페이지 재고와 계속 어긋났었음)
+    const remaining = stock.current;
 
     grandOriginal += original;
     grandRequested += rowTotal;
     grandDistributedActual += distTotal;
+    grandCurrent += remaining;
 
     dataRows.push([num, name, original, ...qtys, rowTotal, distTotal, remaining]);
   });
@@ -2302,7 +2315,7 @@ function generateReport() {
   }
 
   // 합계 행
-  const totalRow = ['', '합계', grandOriginal, ...colTotals, grandRequested, grandDistributedActual, grandOriginal - grandRequested];
+  const totalRow = ['', '합계', grandOriginal, ...colTotals, grandRequested, grandDistributedActual, grandCurrent];
   const totalRowIdx = dataRows.length + 2;
   report.appendRow(totalRow);
   report.getRange(totalRowIdx, 1, 1, headerRow.length)
