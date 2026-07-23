@@ -1191,7 +1191,11 @@ function syncStock() {
         items.forEach(item => {
           if (item.cancelled) return; // 취소된 항목 제외
           const n = String(item.num).padStart(3, '0');
-          usedQty[n] = (usedQty[n] || 0) + Number(item.qty);
+          // 반품된 수량은 재고로 이미 돌아왔으므로 사용량에서 빼야 한다.
+          // (안 그러면 반품처리 직후 자동 새로고침 때 syncStock이 반품 전 수량으로 재계산해 덮어써버림)
+          const returned = Number(item.returnedQty) || 0;
+          const net = Math.max(0, Number(item.qty) - returned);
+          usedQty[n] = (usedQty[n] || 0) + net;
         });
       } catch(e) {}
     }
