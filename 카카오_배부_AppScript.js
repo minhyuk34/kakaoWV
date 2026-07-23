@@ -671,7 +671,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('배부현황')
     .addItem('지금 새로고침', 'generateReport')
-    .addItem('재고 강제 재계산', 'forceSyncStockFromMenu')
+    .addItem('재고만 강제 재계산(리포트 갱신 없이)', 'forceSyncStockFromMenu')
     .addSeparator()
     .addItem('수취예정 리마인더 지금 발송', 'sendUpcomingPickupReminder')
     .addItem('수취예정 리마인더 매주 월요일 자동발송 등록', 'setupWeeklyPickupReminderTrigger')
@@ -2163,6 +2163,10 @@ function sha256(str) {
 // ── 배부현황 리포트 시트 생성 (피벗: 제품×팀) ───────────────────
 // Apps Script 편집기에서 직접 실행: generateReport()
 function generateReport() {
+  // 재고 재계산을 먼저 하지 않고 리포트만 새로고침하면 반품 등으로 바뀐
+  // 재고가 반영되기 전 스냅샷을 보여주게 되므로, 항상 재계산부터 하고 시작한다.
+  try { syncStock(); } catch (e) { Logger.log('generateReport 내 syncStock 실패: ' + e.message); }
+
   const ss = SpreadsheetApp.openById(SHEET_ID);
 
   // 기존 시트 삭제 후 재생성
