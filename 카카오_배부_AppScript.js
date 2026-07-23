@@ -808,6 +808,8 @@ function doPost(e) {
     else if (action === 'approveItems')    result = approveItems(data);
     else if (action === 'updateItemQty')   result = updateItemQty(data);
     else if (action === 'returnDistributedQty') result = returnDistributedQty(data);
+    else if (action === 'editDistributedQty') result = editDistributedQty(data);
+    else if (action === 'addAdminItem')     result = addAdminItem(data);
     else if (action === 'distributeItems') result = distributeItems(data);
     else if (action === 'cancelRequest')   result = cancelRequest(data);
     else if (action === 'cancelItems')       result = cancelItems(data);
@@ -823,7 +825,8 @@ function doPost(e) {
     const REPORT_TRIGGER_ACTIONS = [
       'submitRequest', 'updateRequest', 'approveItems', 'distributeItems',
       'cancelRequest', 'cancelItems', 'confirmCancelItem', 'rejectCancelItem',
-      'updateRequestSchedule', 'updateItemQty', 'mergeIntoRequest', 'returnDistributedQty'
+      'updateRequestSchedule', 'updateItemQty', 'mergeIntoRequest', 'returnDistributedQty',
+      'editDistributedQty', 'addAdminItem'
     ];
     if (action === 'generateReport') {
       // 프런트에서 수동 새로고침 요청 시 직접 호출 가능 (이때는 바로 결과를 보여줘야 하므로 동기 실행)
@@ -1508,6 +1511,133 @@ function returnDistributedQty({ id, idx, returnQty, adminName }) {
         remainingDistributed: items[idx].distributedQty,
         returnedTotal: items[idx].returnedQty
       };
+    }
+    return { ok: false, error: '신청을 찾을 수 없습니다.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ── 배부완료 후 실배부수량 직접 수정(오기입 정정) ──────────────
+// distributedQty는 표시/집계용 필드일 뿐 재고는 신청 시점에 이미 차감되어 있으므로
+// (반품과 달리) 재고를 건드리지 않고 값만 신청수량(qty) 이내로 바로 고쳐 쓴다.
+function editDistributedQty({ id, idx, newQty, adminName }) {
+  newQty = Number(newQty);
+  if (isNaN(newQty) || newQty < 0) return { ok: false, error: '올바른 수량을 입력하세요.' };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = sheet(SHEET_REQ);
+    const rows = s.getDataRange().getValues();
+
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) !== String(id)) continue;
+
+      const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
+      if (isOld) return { ok: false, error: '구형 신청 건은 지원하지 않습니다.' };
+
+      const itemsCol = 10, updatedCol = 13;
+      let items = [];
+      try { items = JSON.parse(rows[i][itemsCol] || '[]'); } catch (e) {}
+
+      if (!items[idx]) return { ok: false, error: '항목을 찾을 수 없습니다.' };
+      if (!items[idx].distributed) return { ok: false, error: '아직 배부되지 않은 항목입니다.' };
+
+      const maxQty = Number(items[idx].qty) || 0;
+      if (newQty > maxQty) return { ok: false, error: `신청수량(${maxQty}개)을 초과할 수 없습니다.` };
+
+      const productNum  = items[idx].num;
+      const productName = items[idx].name;
+      const oldQty = Number(items[idx].distributedQty ?? items[idx].qty) || 0;
+      items[idx].distributedQty = newQty;
+
+      s.getRange(i + 1, itemsCol + 1).setValue(JSON.stringify(items));
+      s.getRange(i + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
+      // 재고 변동은 없지만 정정 사실은 변경이력에 남긴다 (증감 0)
+      logStockChange(
+        { reqId: id, name: rows[i][4], reason: `실배부수량 정정(${adminName || '관리자'}): ${productName} ${oldQty}→${newQty}` },
+        productNum, 0, currentStockOf(productNum)
+      );
+
+      return { ok: true, oldQty, newQty };
+    }
+    return { ok: false, error: '신청을 찾을 수 없습니다.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ── 신청하지 않은 물품을 관리자가 추가로 지급 ──────────────────
+// 기존 신청 건에 원래 없던 항목을 새로 추가하고, 그 자리에서 바로 배부완료 처리한다.
+// (신청 시점에 재고가 차감되는 다른 항목들과 달리, 이 항목은 지급 시점에 재고를 차감한다)
+function addAdminItem({ id, num, name, price, qty, distributeDate, distributeMethod, adminName }) {
+  qty = Number(qty);
+  if (isNaN(qty) || qty <= 0) return { ok: false, error: '올바른 수량을 입력하세요.' };
+  if (!num || !name) return { ok: false, error: '제품을 선택하세요.' };
+
+  const paddedNum = String(num).padStart(3, '0');
+  const available = currentStockOf(paddedNum);
+  if (available !== null && qty > available) {
+    return { ok: false, error: `재고 부족: "${name}" 잔여 ${available}개` };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = sheet(SHEET_REQ);
+    const rows = s.getDataRange().getValues();
+
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) !== String(id)) continue;
+
+      const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
+      if (isOld) return { ok: false, error: '구형 신청 건은 지원하지 않습니다.' };
+
+      const itemsCol = 10, totalQtyCol = 11, statusCol = 12, updatedCol = 13;
+      let items = [];
+      try { items = JSON.parse(rows[i][itemsCol] || '[]'); } catch (e) {}
+
+      items.push({
+        num: paddedNum, name, price: Number(price) || 0, qty,
+        approved: true, distributed: true, distributedQty: qty,
+        distributeDate: distributeDate || formatDateOnly(new Date()),
+        distributeMethod: distributeMethod || '',
+        adminAdded: true
+      });
+
+      deductStock(paddedNum, qty, {
+        reqId: id, name: rows[i][4],
+        reason: `관리자 추가지급(${adminName || '관리자'}): ${name} +${qty}`
+      });
+
+      const activeItems = items.filter(it => !it.cancelled);
+      const activeTotal = activeItems.reduce((s2, it) => s2 + (Number(it.qty) || 0), 0);
+
+      s.getRange(i + 1, itemsCol + 1).setValue(JSON.stringify(items));
+      s.getRange(i + 1, totalQtyCol + 1).setValue(activeTotal);
+      s.getRange(i + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
+
+      // 이 지급으로 인해 신청 건의 활성 항목이 전부 배부완료 상태가 되면 상태를 올려준다.
+      // 그 외의 경우(아직 미배부/미승인 항목이 남아있음)에는 기존 상태를 그대로 유지한다.
+      const prevStatus = String(rows[i][statusCol] || '');
+      const allDone = activeItems.length > 0 && activeItems.every(it => it.distributed);
+      const newStatus = allDone ? 'distributed' : prevStatus;
+      if (newStatus !== prevStatus) {
+        s.getRange(i + 1, statusCol + 1).setValue(newStatus);
+        const recipientEmail = rows[i][6];
+        if (recipientEmail) {
+          sendNotificationEmail(recipientEmail, rows[i][4], rows[i][2], rows[i][3], rows[i][7], activeItems, 'distributed', '');
+          try {
+            sendResultReportRequestEmail({
+              email: recipientEmail, name: rows[i][4], reason: rows[i][7],
+              useDate: formatDateOnly(rows[i][9])
+            }, 'immediate');
+          } catch (e) { Logger.log('결과보고 즉시안내 메일 발송 실패: ' + e.message); }
+        }
+      }
+
+      return { ok: true, newStock: currentStockOf(paddedNum), status: newStatus };
     }
     return { ok: false, error: '신청을 찾을 수 없습니다.' };
   } finally {

@@ -1346,6 +1346,7 @@ function showDetail(id) {
     if (distributed) badge = `<span style="font-size:10px;background:#CCE5FF;color:#004085;padding:2px 6px;border-radius:10px;white-space:nowrap">배부완료</span>`;
     else if (cancelRequested) badge = `<span style="font-size:10px;background:#FFF3CD;color:#856404;padding:2px 6px;border-radius:10px;white-space:nowrap;font-weight:700">⏳ 취소신청</span>`;
     else if (approved) badge = `<span style="font-size:10px;background:#D4EDDA;color:#155724;padding:2px 6px;border-radius:10px;white-space:nowrap">승인됨</span>`;
+    if (i.adminAdded) badge += `<span style="font-size:10px;background:#EDE9FE;color:#6D28D9;padding:2px 6px;border-radius:10px;white-space:nowrap;margin-left:4px">➕ 추가지급</span>`;
 
     // 액션 버튼 (관리자만)
     const isCancelled = i.cancelled || false;
@@ -1363,10 +1364,12 @@ function showDetail(id) {
       // 한 번에 처리하도록 일원화 — 여기서는 검토/취소만
       actionBtn = `<button onclick="cancelItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#888;cursor:pointer;white-space:nowrap">✕ 취소</button>`;
     } else if (isAdmin && distributed) {
-      // 배부완료 후 일부/전체 반품이 들어온 경우 — 반품 수량만큼 재고로 복구
+      // 배부완료 후 실배부수량이 잘못 기록된 경우 직접 정정, 또는 일부/전체 반품 처리
       const remainDist = i.distributedQty ?? i.qty;
+      const safeName = i.name.replace(/'/g, "\\'");
+      actionBtn = `<button onclick="editDistQty('${id}',${idx},${remainDist},${i.qty},'${safeName}')" style="font-size:11px;padding:3px 8px;border:1px solid #8B5CF6;border-radius:5px;background:#fff;color:#8B5CF6;cursor:pointer;white-space:nowrap">✏️ 수정</button>`;
       if (remainDist > 0) {
-        actionBtn = `<button onclick="returnItem('${id}',${idx},${remainDist},'${i.name.replace(/'/g, "\\'")}')" style="font-size:11px;padding:3px 8px;border:none;border-radius:5px;background:#8B5CF6;color:#fff;cursor:pointer;white-space:nowrap">↩️ 반품처리</button>`;
+        actionBtn += `<button onclick="returnItem('${id}',${idx},${remainDist},'${safeName}')" style="font-size:11px;padding:3px 8px;border:none;border-radius:5px;background:#8B5CF6;color:#fff;cursor:pointer;white-space:nowrap;margin-left:3px">↩️ 반품처리</button>`;
       }
     }
 
@@ -1418,6 +1421,19 @@ function showDetail(id) {
     </div>`;
   }
 
+  // 신청하지 않은 물품을 관리자가 추가로 지급 (취소된 신청은 제외)
+  const addItemSection = (isAdmin && r.status !== 'cancelled') ? `
+    <div style="margin-top:14px;padding:10px 12px;background:#F5F3FF;border-radius:8px">
+      <div style="font-size:12px;font-weight:700;color:#6D28D9;margin-bottom:6px">➕ 신청 외 물품 추가 지급</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <select id="addItem-select-${r.id}" style="flex:1;min-width:180px;padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
+          ${PRODUCTS.map(p=>`<option value="${p.num}">${p.num} - ${p.name}</option>`).join('')}
+        </select>
+        <input id="addItem-qty-${r.id}" type="number" min="1" value="1" style="width:70px;padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
+        <button onclick="addAdminItemUI('${r.id}')" style="padding:6px 12px;border:none;border-radius:6px;background:#8B5CF6;color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">추가 지급</button>
+      </div>
+    </div>` : '';
+
   document.getElementById('modal-body').innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:13px;background:#FAFAFA;border-radius:8px;padding:12px 14px;margin-bottom:14px">
       <div><span style="color:var(--muted)">본부</span> &nbsp;<b>${r.dept||'-'}</b></div>
@@ -1446,7 +1462,8 @@ function showDetail(id) {
       <span style="color:var(--brown);font-size:15px">${grandTotal?grandTotal.toLocaleString()+'원':'-'}</span>
     </div>
     ${distributeFields}
-    ${bulkBtns}`;
+    ${bulkBtns}
+    ${addItemSection}`;
 
   document.getElementById('modal-confirm').textContent = '닫기';
   document.getElementById('modal-confirm').onclick = closeModal;
@@ -1497,6 +1514,43 @@ async function returnItem(id, idx, maxQty, itemName) {
     if (!res.ok) { toast('❌ 반품 처리 실패: ' + res.error); return; }
     await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
     toast(`↩️ 반품 처리 완료 (재고 ${res.newStock}개)`);
+    showDetail(id); renderAdmin(); updateStats();
+  } catch(e) { toast('❌ 서버 오류: ' + e.message); }
+}
+async function editDistQty(id, idx, currentQty, maxQty, itemName) {
+  const input = prompt(`"${itemName}" 실제 배부수량을 입력하세요 (신청수량 ${maxQty}개 이내 · 재고에는 영향 없음)`, String(currentQty));
+  if (input === null) return;
+  const qty = parseInt(input, 10);
+  if (isNaN(qty) || qty < 0 || qty > maxQty) { toast(`❌ 올바른 수량을 입력하세요 (0~${maxQty})`); return; }
+  if (qty === currentQty) return;
+  if (!confirm(`"${itemName}" 실배부수량을 ${currentQty}개 → ${qty}개로 정정합니다.\n(재고 수량에는 영향을 주지 않습니다)`)) return;
+
+  try {
+    const res = await api('editDistributedQty', { id, idx, newQty: qty, adminName: currentUser?.name || '' });
+    if (!res.ok) { toast('❌ 수정 실패: ' + res.error); return; }
+    await loadRequestsFromAPI();
+    toast(`✏️ 실배부수량 정정 완료 (${res.oldQty} → ${res.newQty})`);
+    showDetail(id); renderAdmin(); updateStats();
+  } catch(e) { toast('❌ 서버 오류: ' + e.message); }
+}
+async function addAdminItemUI(id) {
+  const sel = document.getElementById(`addItem-select-${id}`);
+  const qtyInput = document.getElementById(`addItem-qty-${id}`);
+  if (!sel || !qtyInput) return;
+  const prod = PRODUCTS.find(p => p.num === sel.value);
+  const qty = parseInt(qtyInput.value, 10);
+  if (!prod) { toast('❌ 제품을 선택하세요'); return; }
+  if (isNaN(qty) || qty <= 0) { toast('❌ 올바른 수량을 입력하세요'); return; }
+  if (!confirm(`"${prod.name}" ${qty}개를 신청 외 추가 지급 처리하시겠습니까?\n(재고에서 즉시 차감되고 배부완료로 기록됩니다)`)) return;
+
+  try {
+    const res = await api('addAdminItem', {
+      id, num: prod.num, name: prod.name, price: prod.price_num, qty,
+      adminName: currentUser?.name || ''
+    });
+    if (!res.ok) { toast('❌ 추가 지급 실패: ' + res.error); return; }
+    await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
+    toast(`➕ 추가 지급 완료 (재고 ${res.newStock}개)`);
     showDetail(id); renderAdmin(); updateStats();
   } catch(e) { toast('❌ 서버 오류: ' + e.message); }
 }
