@@ -1362,6 +1362,12 @@ function showDetail(id) {
       // 배부 실행은 신청상세에서 하지 않고 하단의 "📦 배부 처리하기" 버튼(항목별 배부처리 화면)에서
       // 한 번에 처리하도록 일원화 — 여기서는 검토/취소만
       actionBtn = `<button onclick="cancelItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#888;cursor:pointer;white-space:nowrap">✕ 취소</button>`;
+    } else if (isAdmin && distributed) {
+      // 배부완료 후 일부/전체 반품이 들어온 경우 — 반품 수량만큼 재고로 복구
+      const remainDist = i.distributedQty ?? i.qty;
+      if (remainDist > 0) {
+        actionBtn = `<button onclick="returnItem('${id}',${idx},${remainDist},'${i.name.replace(/'/g, "\\'")}')" style="font-size:11px;padding:3px 8px;border:none;border-radius:5px;background:#8B5CF6;color:#fff;cursor:pointer;white-space:nowrap">↩️ 반품처리</button>`;
+      }
     }
 
     const canEditQty = isAdmin && !isCancelled && !distributed;
@@ -1375,7 +1381,7 @@ function showDetail(id) {
         ${actionBtn}
       </div>
       ${i.detail?`<div style="font-size:11px;color:var(--blue);margin-top:3px">📌 ${i.detail}</div>`:''}
-      ${distributed?`<div style="font-size:11px;color:var(--muted);margin-top:2px">📋 신청 ${i.qty.toLocaleString()}개 · <span style="color:var(--green);font-weight:700">실배부 ${(i.distributedQty ?? i.qty).toLocaleString()}개</span></div>`:''}
+      ${distributed?`<div style="font-size:11px;color:var(--muted);margin-top:2px">📋 신청 ${i.qty.toLocaleString()}개 · <span style="color:var(--green);font-weight:700">실배부 ${(i.distributedQty ?? i.qty).toLocaleString()}개</span>${i.returnedQty?` · <span style="color:#8B5CF6;font-weight:700">↩️ 반품 ${i.returnedQty.toLocaleString()}개</span>`:''}</div>`:''}
       ${i.distributeDate||i.distributeMethod?`<div style="font-size:11px;color:var(--muted);margin-top:2px">🚚 ${i.distributeDate||''} ${i.distributeMethod?'· '+i.distributeMethod:''}</div>`:''}
       ${canEditQty?`
       <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
@@ -1476,6 +1482,21 @@ async function saveItemQty(id, idx) {
     }
     await loadRequestsFromAPI();
     toast(res.deferredReqId ? '✅ 수량 수정 완료 · 한 달 뒤 신청 자동 등록됨' : '✅ 수량 수정 완료');
+    showDetail(id); renderAdmin(); updateStats();
+  } catch(e) { toast('❌ 서버 오류: ' + e.message); }
+}
+async function returnItem(id, idx, maxQty, itemName) {
+  const input = prompt(`"${itemName}" 반품 수량을 입력하세요 (최대 ${maxQty}개)`, String(maxQty));
+  if (input === null) return;
+  const qty = parseInt(input, 10);
+  if (isNaN(qty) || qty <= 0 || qty > maxQty) { toast(`❌ 올바른 수량을 입력하세요 (1~${maxQty})`); return; }
+  if (!confirm(`"${itemName}" ${qty}개를 반품 처리하고 재고로 복구하시겠습니까?`)) return;
+
+  try {
+    const res = await api('returnDistributedQty', { id, idx, returnQty: qty, adminName: currentUser?.name || '' });
+    if (!res.ok) { toast('❌ 반품 처리 실패: ' + res.error); return; }
+    await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
+    toast(`↩️ 반품 처리 완료 (재고 ${res.newStock}개)`);
     showDetail(id); renderAdmin(); updateStats();
   } catch(e) { toast('❌ 서버 오류: ' + e.message); }
 }

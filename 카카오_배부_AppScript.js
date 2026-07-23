@@ -807,6 +807,7 @@ function doPost(e) {
     else if (action === 'syncStock')       result = syncStock();
     else if (action === 'approveItems')    result = approveItems(data);
     else if (action === 'updateItemQty')   result = updateItemQty(data);
+    else if (action === 'returnDistributedQty') result = returnDistributedQty(data);
     else if (action === 'distributeItems') result = distributeItems(data);
     else if (action === 'cancelRequest')   result = cancelRequest(data);
     else if (action === 'cancelItems')       result = cancelItems(data);
@@ -822,7 +823,7 @@ function doPost(e) {
     const REPORT_TRIGGER_ACTIONS = [
       'submitRequest', 'updateRequest', 'approveItems', 'distributeItems',
       'cancelRequest', 'cancelItems', 'confirmCancelItem', 'rejectCancelItem',
-      'updateRequestSchedule', 'updateItemQty', 'mergeIntoRequest'
+      'updateRequestSchedule', 'updateItemQty', 'mergeIntoRequest', 'returnDistributedQty'
     ];
     if (action === 'generateReport') {
       // 프런트에서 수동 새로고침 요청 시 직접 호출 가능 (이때는 바로 결과를 보여줘야 하므로 동기 실행)
@@ -1448,6 +1449,64 @@ function updateItemQty({ id, idx, qty, adminName, deferReduced }) {
         stockWarning: newStock !== null && newStock <= 0,
         productName,
         deferredReqId
+      };
+    }
+    return { ok: false, error: '신청을 찾을 수 없습니다.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ── 배부완료 후 반품 처리 ────────────────────────────────────
+// 이미 배부된 항목이라도 일부(또는 전부)가 반품되는 경우, 반품수량만큼
+// 실제배부수량을 줄이고 그만큼 재고를 복구한다. 신청수량(qty)은 원 신청 기록이므로 건드리지 않는다.
+function returnDistributedQty({ id, idx, returnQty, adminName }) {
+  returnQty = Number(returnQty);
+  if (isNaN(returnQty) || returnQty <= 0) return { ok: false, error: '올바른 반품 수량을 입력하세요.' };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = sheet(SHEET_REQ);
+    const rows = s.getDataRange().getValues();
+
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) !== String(id)) continue;
+
+      const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
+      if (isOld) return { ok: false, error: '구형 신청 건은 반품 처리를 지원하지 않습니다.' };
+
+      const itemsCol = 10, updatedCol = 13;
+      let items = [];
+      try { items = JSON.parse(rows[i][itemsCol] || '[]'); } catch (e) {}
+
+      if (!items[idx]) return { ok: false, error: '항목을 찾을 수 없습니다.' };
+      if (!items[idx].distributed) return { ok: false, error: '아직 배부되지 않은 항목은 반품 처리할 수 없습니다.' };
+
+      const currentDist = Number(items[idx].distributedQty ?? items[idx].qty) || 0;
+      if (returnQty > currentDist) {
+        return { ok: false, error: `반품 수량이 실제 배부수량(${currentDist}개)보다 많습니다.` };
+      }
+
+      const productNum  = items[idx].num;
+      const productName = items[idx].name;
+
+      items[idx].distributedQty = currentDist - returnQty;
+      items[idx].returnedQty = (Number(items[idx].returnedQty) || 0) + returnQty;
+
+      restoreStock(productNum, returnQty, {
+        reqId: id, name: rows[i][4],
+        reason: `반품 처리(${adminName || '관리자'}): ${productName} -${returnQty}`
+      });
+
+      s.getRange(i + 1, itemsCol + 1).setValue(JSON.stringify(items));
+      s.getRange(i + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
+
+      return {
+        ok: true,
+        newStock: currentStockOf(productNum),
+        remainingDistributed: items[idx].distributedQty,
+        returnedTotal: items[idx].returnedQty
       };
     }
     return { ok: false, error: '신청을 찾을 수 없습니다.' };
