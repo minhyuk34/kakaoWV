@@ -349,7 +349,7 @@ tr:hover td{background:#FFFBF0}
             <option value="">본부/실을 먼저 선택하세요</option>
           </select>
         </div>
-        <div class="form-field"><label>이름 *</label><input id="req-name" type="text" placeholder="홍길동"></div>
+        <div class="form-field"><label>이름 *</label><input id="req-name" type="text" placeholder="홍길동" readonly style="background:#F5F5F5;color:var(--muted);cursor:not-allowed"></div>
         <div class="form-field"><label>연락처 *</label><input id="req-contact" type="text" placeholder="010-0000-0000"></div>
       </div>
       <div class="form-field" style="margin-top:10px">
@@ -797,9 +797,9 @@ function renderCart() {
   _fillUserInfo();
 }
 function _fillUserInfo() {
-  // 이름: 비어있을 때만 채우기
+  // 이름: 로그인한 계정 이름으로 고정 (읽기전용 — 다른 사람 이름으로 신청되는 사고 방지)
   const nameEl = document.getElementById('req-name');
-  if (nameEl && !nameEl.value && currentUser?.name) nameEl.value = currentUser.name;
+  if (nameEl) nameEl.value = currentUser?.name || '';
   // 이메일: 항상 currentUser.email로 채우기 (수정 가능)
   const emailEl = document.getElementById('req-email');
   if (emailEl) {
@@ -882,7 +882,9 @@ function addToCartFromCard(num) {
 async function submitRequest() {
   const dept       = document.getElementById('req-dept').value.trim();
   const team       = document.getElementById('req-team').value.trim();
-  const name       = document.getElementById('req-name').value.trim();
+  // 이름 입력칸 값이 아니라 로그인 계정의 이름을 그대로 사용 — 입력칸은 읽기전용이지만
+  // 혹시라도 값이 조작되더라도 신청자 이름이 로그인 계정과 달라지지 않도록 이중으로 막는다.
+  const name       = (currentUser?.name || '').trim();
   let contact = document.getElementById('req-contact').value.trim();
   // 자동 하이픈 포맷: 숫자만 추출 후 000-0000-0000 형식으로
   const digits = contact.replace(/\D/g, '');
