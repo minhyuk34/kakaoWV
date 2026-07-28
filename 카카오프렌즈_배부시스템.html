@@ -1863,11 +1863,15 @@ function checkAllDist(val) {
   });
 }
 async function submitDistribute(id, itemCount) {
-  const distributed = [];
-  const dateMap     = {};
-  const methodMap   = {};
-  const qtyMap      = {};
+  const r = getRequests().find(x => String(x.id) === String(id));
+  const distributed   = [];
+  const dateMap       = {};
+  const methodMap     = {};
+  const qtyMap        = {};
+  const pendingIndices = []; // 이번에 체크 안 됐고, 취소/기배부 상태도 아닌(=아직 미해결) 항목
   for (let i = 0; i < itemCount; i++) {
+    const item = r?.items?.[i];
+    if (!item || item.cancelled) continue;
     const chk = document.getElementById('dist-chk-'+i);
     if (chk?.checked) {
       distributed.push(i);
@@ -1875,9 +1879,32 @@ async function submitDistribute(id, itemCount) {
       methodMap[i] = document.getElementById('dist-method-'+i)?.value || '';
       const qtyEl  = document.getElementById('dist-qty-'+i);
       if (qtyEl) qtyMap[i] = parseInt(qtyEl.value, 10);
+    } else if (!item.distributed) {
+      pendingIndices.push(i);
     }
   }
   if (distributed.length === 0) { toast('배부할 항목을 선택해주세요'); return; }
+
+  // 체크 안 된 미해결 항목이 남아있으면 취소할지, 다음 배부일로 이월할지 먼저 정한다.
+  // (안 그러면 신청 전체가 계속 "승인됨"에 머물러 배부이력으로 안 넘어가고, 관리자도 무엇이
+  // 남았는지 알기 어려움)
+  let pendingAction = null, deferDate = '';
+  if (pendingIndices.length > 0) {
+    const wantCancel = confirm(
+      `체크 안 된 항목 ${pendingIndices.length}개는 이번에 배부하지 않습니다.\n\n` +
+      `확인: 이 항목들을 취소 처리(재고 자동 복구)\n취소: 다음 배부일로 이월(새 날짜의 새 신청 자동 생성)`
+    );
+    if (wantCancel) {
+      pendingAction = 'cancel';
+    } else {
+      const input = prompt('남은 항목을 다음에 배부할 날짜를 입력하세요 (예: 2026-08-15)', '');
+      if (!input) { toast('배부일을 입력하지 않아 취소했습니다. 다시 시도해주세요.'); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.trim())) { toast('❌ 날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)'); return; }
+      pendingAction = 'defer';
+      deferDate = input.trim();
+    }
+  }
+
   closeModal();
   try {
     const res = await api('distributeItems', {
@@ -1885,11 +1912,19 @@ async function submitDistribute(id, itemCount) {
       distributedIndices: distributed,
       dateMap,
       methodMap,
-      qtyMap
+      qtyMap,
+      pendingIndices,
+      pendingAction,
+      deferDate,
+      adminName: currentUser?.name || ''
     });
     if (!res.ok) { toast('❌ 처리 실패: '+res.error); return; }
     await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
-    toast(`📦 ${distributed.length}개 항목 배부완료`);
+    toast(
+      res.deferredReqId ? `📦 ${distributed.length}개 항목 배부완료 · 나머지는 ${deferDate}로 이월 등록됨`
+      : pendingAction === 'cancel' ? `📦 ${distributed.length}개 항목 배부완료 · 나머지는 취소 처리됨`
+      : `📦 ${distributed.length}개 항목 배부완료`
+    );
     renderAdmin(); updateStats();
   } catch(e) { toast('❌ 서버 오류: '+e.message); }
 }

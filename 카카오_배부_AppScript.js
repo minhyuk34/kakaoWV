@@ -1617,6 +1617,35 @@ function createFollowUpRequest({ dept, team, name, contact, email, originalReqId
   return id;
 }
 
+// 항목별 배부처리 중 일부 항목만 체크하고 나머지는 "다음 배부일로 이월"을 선택했을 때,
+// 같은 신청인 앞으로 관리자가 지정한 새 날짜의 새 신청을 만든다. 이미 승인을 마친
+// 항목이므로 재승인 없이 approved로 바로 시작하고, 재고는 원 신청에서 이미 예약된
+// 것을 그대로 이어받으므로 다시 차감/복구하지 않는다(원 신청에서는 해당 항목을
+// cancelled 처리해서 이중 집계를 막는다 — distributeItems에서 처리).
+function createDeferredRequest({ dept, team, name, contact, email, reason, originalReqId }, items, newDate) {
+  const s = sheet(SHEET_REQ);
+  const id = Date.now().toString();
+  const dateStr = formatDateOnly(newDate);
+
+  const cleanItems = items.map(it => ({
+    num: it.num, name: it.name, qty: it.qty, price: it.price || 0,
+    detail: it.detail || '', approved: true
+  }));
+  const totalQty = cleanItems.reduce((s2, it) => s2 + (Number(it.qty) || 0), 0);
+  const newRow = s.getLastRow() + 1;
+  s.appendRow([
+    id, new Date().toLocaleString('ko-KR'),
+    dept || '', team || '', name || '', contact || '', email || '',
+    (reason ? `${reason} ` : '') + `[자동생성] 배부 보류 이월 (원신청 ${originalReqId})`,
+    dateStr, dateStr,
+    JSON.stringify(cleanItems), totalQty,
+    'approved', '', ''
+  ]);
+  s.getRange(newRow, 9).setNumberFormat('@').setValue(dateStr);
+  s.getRange(newRow, 10).setNumberFormat('@').setValue(dateStr);
+  return id;
+}
+
 // ── 신청 병합 ────────────────────────────────────────────────
 // 수취예정일·사용예정일이 같은 기존 신청에 새 항목들을 합쳐 넣는다.
 function mergeIntoRequest({ existingId, items }) {
@@ -2069,7 +2098,7 @@ function approveItems({ id, indices }) {
 }
 
 // ── 항목별 배부 처리 ──────────────────────────────────────────
-function distributeItems({ id, distributedIndices, distributeDate, distributeMethod, dateMap, methodMap, qtyMap }) {
+function distributeItems({ id, distributedIndices, distributeDate, distributeMethod, dateMap, methodMap, qtyMap, pendingIndices, pendingAction, deferDate, adminName }) {
   const s = sheet(SHEET_REQ);
   const rows = s.getDataRange().getValues();
 
@@ -2082,6 +2111,23 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
 
     let items = [];
     try { items = JSON.parse(rows[i][itemsCol] || '[]'); } catch(e) { items = []; }
+
+    // 이번에 체크 안 된(=보류) 항목 중 "취소" 또는 "다음 배부일로 이월"이 지정된 항목을 먼저 처리.
+    // 이렇게 해야 남은 활성 항목이 전부 배부완료된 경우 신청 전체가 정상적으로 배부완료로 넘어간다.
+    const deferredItems = [];
+    if (Array.isArray(pendingIndices) && pendingAction) {
+      pendingIndices.forEach(idx => {
+        const item = items[idx];
+        if (!item || item.cancelled || item.distributed) return; // 이미 처리된 항목은 건드리지 않음
+        if (pendingAction === 'cancel') {
+          item.cancelled = true;
+          restoreStock(item.num, item.qty, { reqId: id, name: rows[i][4], reason: `배부 보류 항목 취소(${adminName || '관리자'})` });
+        } else if (pendingAction === 'defer' && deferDate) {
+          item.cancelled = true; // 원 신청에서는 제외하고 새 신청으로 이월
+          deferredItems.push(item);
+        }
+      });
+    }
 
     // 선택되지 않은 항목 → 재고 복구
     items.forEach((item, idx) => {
@@ -2109,8 +2155,18 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
       }
     });
 
+    // 이월 대상 항목이 있으면 같은 신청인 앞으로 새 날짜의 새 신청을 만든다
+    let deferredReqId = null;
+    if (deferredItems.length > 0) {
+      deferredReqId = createDeferredRequest({
+        dept: rows[i][2], team: rows[i][3], name: rows[i][4],
+        contact: rows[i][5], email: rows[i][6], reason: rows[i][7],
+        originalReqId: id
+      }, deferredItems, deferDate);
+    }
+
     // 취소되지 않은 항목이 전부 배부됐으면 status=distributed, 일부만이면 approved 유지
-    // (취소된 항목은 distributed가 될 수 없으므로 반드시 제외하고 판단해야 함)
+    // (취소·이월 처리된 항목은 distributed가 될 수 없으므로 반드시 제외하고 판단해야 함)
     const prevStatus = String(rows[i][statusCol] || '');
     const activeForDist = items.filter(item => !item.cancelled);
     const allDone = activeForDist.length > 0 && activeForDist.every(item => item.distributed);
@@ -2138,7 +2194,7 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
       }
     }
 
-    return { ok: true, status: newStatus };
+    return { ok: true, status: newStatus, deferredReqId };
   }
   return { ok: false, error: '신청을 찾을 수 없습니다.' };
 }
