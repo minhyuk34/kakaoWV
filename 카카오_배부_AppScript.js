@@ -1408,11 +1408,19 @@ function sendNotificationEmail(to, name, dept, team, reason, items, status, admi
     </div>
   </div>`;
 
-  MailApp.sendEmail({
-    to:      to,
-    subject: `[카카오프렌즈 배부] ${name}님 신청이 ${statusText}`,
-    htmlBody: html
-  });
+  // 메일 발송 실패(잘못된 이메일 주소, 일일 발송 한도 초과 등)가 나면 안 되는 이유:
+  // 이 함수가 호출되는 시점엔 이미 시트에 상태/배부 데이터가 저장된 뒤라, 여기서
+  // 예외가 그대로 올라가면 실제로는 처리가 성공했는데도 화면에는 "서버 오류"로
+  // 뜨는 오해를 만든다. 그래서 메일 발송 실패는 조용히 로그만 남기고 삼킨다.
+  try {
+    MailApp.sendEmail({
+      to:      to,
+      subject: `[카카오프렌즈 배부] ${name}님 신청이 ${statusText}`,
+      htmlBody: html
+    });
+  } catch (e) {
+    Logger.log(`알림 메일 발송 실패 (수신: ${to}, 상태: ${status}): ${e.message}`);
+  }
 }
 
 // ── 재고 조회 ─────────────────────────────────────────────────
@@ -2098,7 +2106,7 @@ function approveItems({ id, indices }) {
 }
 
 // ── 항목별 배부 처리 ──────────────────────────────────────────
-function distributeItems({ id, distributedIndices, distributeDate, distributeMethod, dateMap, methodMap, qtyMap, pendingIndices, pendingAction, deferDate, adminName }) {
+function distributeItems({ id, distributedIndices, distributeDate, distributeMethod, dateMap, methodMap, qtyMap, pendingActionMap, deferDate, adminName }) {
   const s = sheet(SHEET_REQ);
   const rows = s.getDataRange().getValues();
 
@@ -2112,17 +2120,20 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
     let items = [];
     try { items = JSON.parse(rows[i][itemsCol] || '[]'); } catch(e) { items = []; }
 
-    // 이번에 체크 안 된(=보류) 항목 중 "취소" 또는 "다음 배부일로 이월"이 지정된 항목을 먼저 처리.
+    // 이번에 체크 안 된(=보류) 항목 중 항목별로 "취소" 또는 "다음 배부일로 이월"이 지정된 것을 먼저 처리.
     // 이렇게 해야 남은 활성 항목이 전부 배부완료된 경우 신청 전체가 정상적으로 배부완료로 넘어간다.
     const deferredItems = [];
-    if (Array.isArray(pendingIndices) && pendingAction) {
-      pendingIndices.forEach(idx => {
+    if (pendingActionMap && typeof pendingActionMap === 'object') {
+      Object.keys(pendingActionMap).forEach(key => {
+        const idx = Number(key);
         const item = items[idx];
         if (!item || item.cancelled || item.distributed) return; // 이미 처리된 항목은 건드리지 않음
-        if (pendingAction === 'cancel') {
+        if (distributedIndices.includes(idx)) return; // 체크된 항목은 대상 아님(방어적)
+        const action = pendingActionMap[key];
+        if (action === 'cancel') {
           item.cancelled = true;
           restoreStock(item.num, item.qty, { reqId: id, name: rows[i][4], reason: `배부 보류 항목 취소(${adminName || '관리자'})` });
-        } else if (pendingAction === 'defer' && deferDate) {
+        } else if (action === 'defer' && deferDate) {
           item.cancelled = true; // 원 신청에서는 제외하고 새 신청으로 이월
           deferredItems.push(item);
         }

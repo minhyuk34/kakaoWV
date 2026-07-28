@@ -1793,9 +1793,16 @@ function showDistributeModal(id) {
           style="padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
         <button onclick="copyRowToAll(${idx})" title="이 값을 전체에 복사" style="padding:4px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:#fff;cursor:pointer;white-space:nowrap">↑전체복사</button>
       </div>
-      <div style="padding-left:28px;margin-top:3px">
+      <div style="padding-left:28px;margin-top:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:11px;color:var(--muted)">수취예정일: <b>${reqDate||'-'}</b></span>
-        ${done?`<span style="font-size:11px;color:var(--green);margin-left:8px">✓ 배부완료 (실배부 ${distQty}개) ${item.distributeDate||''} ${item.distributeMethod?'· '+item.distributeMethod:''}</span>`:''}
+        ${done?`<span style="font-size:11px;color:var(--green)">✓ 배부완료 (실배부 ${distQty}개) ${item.distributeDate||''} ${item.distributeMethod?'· '+item.distributeMethod:''}</span>`:`
+        <span style="font-size:11px;color:var(--muted);white-space:nowrap">미체크 시 처리</span>
+        <select id="dist-pending-${idx}" title="이번에 체크 안 하면 어떻게 할지" style="padding:3px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;outline:none;background:#fff">
+          <option value="">보류(그대로 두기)</option>
+          <option value="cancel">🚫 취소</option>
+          <option value="defer">📅 다음 배부일로 이월</option>
+        </select>
+        `}
       </div>
     </div>`;
   }).join('');
@@ -1814,11 +1821,16 @@ function showDistributeModal(id) {
         <button onclick="applyBulkInput()" style="padding:6px 14px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">전체 적용</button>
       </div>
     </div>
+    <!-- 미체크 항목 중 "이월"을 선택한 항목에 공통 적용될 다음 배부일 -->
+    <div style="background:#FFF3E0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:#B7791F;margin-bottom:7px">📅 미체크 항목 중 "이월" 선택 시 적용할 다음 배부일</div>
+      <input id="dist-defer-date" type="date" style="width:100%;padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
+    </div>
     <div style="font-size:11px;color:var(--muted);padding:0 4px 6px;display:grid;grid-template-columns:24px 1fr 70px 105px;gap:6px">
       <span></span><span>제품명</span><span style="text-align:right">신청수량</span><span style="text-align:right">금액</span>
     </div>
     ${rows}
-    <p style="font-size:12px;color:var(--muted);margin-top:10px">✓ 체크된 항목만 배부완료 처리됩니다. 미체크 항목은 재고가 복구됩니다.</p>`;
+    <p style="font-size:12px;color:var(--muted);margin-top:10px">✓ 체크된 항목만 배부완료 처리됩니다. 미체크 항목은 각 항목 아래 "미체크 시 처리"에서 취소/이월을 선택할 수 있고, 아무것도 선택 안 하면 그대로 승인됨 상태로 남습니다.</p>`;
 
   document.getElementById('modal-confirm').textContent = '선택 항목 배부완료';
   document.getElementById('modal-confirm').onclick = () => submitDistribute(id, r.items.length);
@@ -1853,6 +1865,11 @@ function toggleDistRow(idx) {
   const row = document.getElementById('dist-row-'+idx);
   if (chk.checked) row.classList.remove('done');
   else row.classList.add('done');
+  const pendingSel = document.getElementById('dist-pending-'+idx);
+  if (pendingSel) {
+    pendingSel.disabled = chk.checked;
+    if (chk.checked) pendingSel.value = '';
+  }
 }
 function checkAllDist(val) {
   document.querySelectorAll('[id^="dist-chk-"]').forEach(chk => {
@@ -1860,15 +1877,21 @@ function checkAllDist(val) {
     const idx = chk.id.replace('dist-chk-','');
     const row = document.getElementById('dist-row-'+idx);
     if (val) row.classList.remove('done'); else row.classList.add('done');
+    const pendingSel = document.getElementById('dist-pending-'+idx);
+    if (pendingSel) {
+      pendingSel.disabled = val;
+      if (val) pendingSel.value = '';
+    }
   });
 }
 async function submitDistribute(id, itemCount) {
   const r = getRequests().find(x => String(x.id) === String(id));
-  const distributed   = [];
-  const dateMap       = {};
-  const methodMap     = {};
-  const qtyMap        = {};
-  const pendingIndices = []; // 이번에 체크 안 됐고, 취소/기배부 상태도 아닌(=아직 미해결) 항목
+  const distributed     = [];
+  const dateMap         = {};
+  const methodMap       = {};
+  const qtyMap          = {};
+  const pendingActionMap = {}; // 이번에 체크 안 된 항목 중 취소/이월을 선택한 것들 { idx: 'cancel'|'defer' }
+  let deferCount = 0;
   for (let i = 0; i < itemCount; i++) {
     const item = r?.items?.[i];
     if (!item || item.cancelled) continue;
@@ -1880,30 +1903,18 @@ async function submitDistribute(id, itemCount) {
       const qtyEl  = document.getElementById('dist-qty-'+i);
       if (qtyEl) qtyMap[i] = parseInt(qtyEl.value, 10);
     } else if (!item.distributed) {
-      pendingIndices.push(i);
+      const action = document.getElementById('dist-pending-'+i)?.value || '';
+      if (action === 'cancel' || action === 'defer') {
+        pendingActionMap[i] = action;
+        if (action === 'defer') deferCount++;
+      }
     }
   }
   if (distributed.length === 0) { toast('배부할 항목을 선택해주세요'); return; }
 
-  // 체크 안 된 미해결 항목이 남아있으면 취소할지, 다음 배부일로 이월할지 먼저 정한다.
-  // (안 그러면 신청 전체가 계속 "승인됨"에 머물러 배부이력으로 안 넘어가고, 관리자도 무엇이
-  // 남았는지 알기 어려움)
-  let pendingAction = null, deferDate = '';
-  if (pendingIndices.length > 0) {
-    const wantCancel = confirm(
-      `체크 안 된 항목 ${pendingIndices.length}개는 이번에 배부하지 않습니다.\n\n` +
-      `확인: 이 항목들을 취소 처리(재고 자동 복구)\n취소: 다음 배부일로 이월(새 날짜의 새 신청 자동 생성)`
-    );
-    if (wantCancel) {
-      pendingAction = 'cancel';
-    } else {
-      const input = prompt('남은 항목을 다음에 배부할 날짜를 입력하세요 (예: 2026-08-15)', '');
-      if (!input) { toast('배부일을 입력하지 않아 취소했습니다. 다시 시도해주세요.'); return; }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.trim())) { toast('❌ 날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)'); return; }
-      pendingAction = 'defer';
-      deferDate = input.trim();
-    }
-  }
+  // "이월"을 하나라도 선택했으면 공통 다음 배부일이 반드시 필요하다.
+  let deferDate = document.getElementById('dist-defer-date')?.value || '';
+  if (deferCount > 0 && !deferDate) { toast('❌ 이월할 항목이 있습니다. "다음 배부일"을 입력해주세요'); return; }
 
   closeModal();
   try {
@@ -1913,20 +1924,30 @@ async function submitDistribute(id, itemCount) {
       dateMap,
       methodMap,
       qtyMap,
-      pendingIndices,
-      pendingAction,
+      pendingActionMap,
       deferDate,
       adminName: currentUser?.name || ''
     });
-    if (!res.ok) { toast('❌ 처리 실패: '+res.error); return; }
+    if (!res.ok) {
+      // 실패 응답이라도 시트에는 이미 일부 반영됐을 수 있으므로(예: 메일 발송 단계에서
+      // 예외가 나는 경우) 화면이 낡은 상태로 남지 않도록 무조건 최신 데이터를 다시 불러온다.
+      await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
+      renderAdmin(); updateStats();
+      toast('❌ 처리 실패: '+res.error);
+      return;
+    }
     await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
-    toast(
-      res.deferredReqId ? `📦 ${distributed.length}개 항목 배부완료 · 나머지는 ${deferDate}로 이월 등록됨`
-      : pendingAction === 'cancel' ? `📦 ${distributed.length}개 항목 배부완료 · 나머지는 취소 처리됨`
-      : `📦 ${distributed.length}개 항목 배부완료`
-    );
+    const cancelCount = Object.values(pendingActionMap).filter(a => a === 'cancel').length;
+    const extras = [];
+    if (cancelCount > 0) extras.push(`취소 ${cancelCount}건`);
+    if (res.deferredReqId) extras.push(`이월 ${deferCount}건(${deferDate})`);
+    toast(`📦 ${distributed.length}개 항목 배부완료` + (extras.length ? ' · ' + extras.join(' · ') : ''));
     renderAdmin(); updateStats();
-  } catch(e) { toast('❌ 서버 오류: '+e.message); }
+  } catch(e) {
+    await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]).catch(()=>{});
+    renderAdmin(); updateStats();
+    toast('❌ 서버 오류: '+e.message);
+  }
 }
 
 // ── 신청 취소 ──
