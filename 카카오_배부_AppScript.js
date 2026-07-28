@@ -2141,6 +2141,7 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
     }
 
     // 선택되지 않은 항목 → 재고 복구
+    const stockWarnings = [];
     items.forEach((item, idx) => {
       if (item.cancelled) return; // 취소된 항목은 배부 대상에서 제외 (프런트에서 체크박스 자체가 없지만 방어적으로 한 번 더 확인)
       const wasDistributed = item.distributed || false;
@@ -2158,10 +2159,21 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
         if (d) item.distributeDate   = d;
         if (m) item.distributeMethod = m;
 
-        // 실제 배부수량 기록 (신청내역과 별개로 표시용 — 재고 차감은 신청 시점에 이미 반영되어 있으므로 여기선 건드리지 않음)
+        // 실제 배부수량 기록 — 관리자는 신청수량을 초과해서 지정할 수 있다(예: 신청 10개인데
+        // 실제로는 15개 지급). 신청수량만큼은 신청 시점에 이미 재고에서 빠져있으므로,
+        // 초과분만큼만 지금 추가로 차감하고 재고가 0 이하가 되면 경고 대상으로 기록한다.
         let distQty = (qtyMap && qtyMap[idx] !== undefined) ? Number(qtyMap[idx]) : item.qty;
         if (isNaN(distQty) || distQty < 0) distQty = item.qty;
-        if (distQty > item.qty) distQty = item.qty; // 신청수량을 초과할 수 없음
+        if (distQty > item.qty) {
+          const excess = distQty - item.qty;
+          const newStock = adjustStockAllowNegative(item.num, -excess, {
+            reqId: id, name: rows[i][4],
+            reason: `신청수량 초과 배부(${adminName || '관리자'}): ${item.name} +${excess}(초과분)`
+          });
+          if (newStock !== null && newStock <= 0) {
+            stockWarnings.push({ productName: item.name, newStock });
+          }
+        }
         item.distributedQty = distQty;
       }
     });
@@ -2205,7 +2217,7 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
       }
     }
 
-    return { ok: true, status: newStatus, deferredReqId };
+    return { ok: true, status: newStatus, deferredReqId, stockWarnings };
   }
   return { ok: false, error: '신청을 찾을 수 없습니다.' };
 }
