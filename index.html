@@ -1830,7 +1830,7 @@ function showDistributeModal(id) {
       <span></span><span>제품명</span><span style="text-align:right">신청수량</span><span style="text-align:right">금액</span>
     </div>
     ${rows}
-    <p style="font-size:12px;color:var(--muted);margin-top:10px">✓ 체크된 항목만 배부완료 처리됩니다. 미체크 항목은 각 항목 아래 "미체크 시 처리"에서 취소/이월을 선택할 수 있고, 아무것도 선택 안 하면 그대로 승인됨 상태로 남습니다.</p>`;
+    <p style="font-size:12px;color:var(--muted);margin-top:10px">✓ 체크된 항목만 배부완료 처리됩니다. 미체크 항목은 각 항목 아래 "미체크 시 처리"에서 미리 취소/이월을 정할 수 있고, 정하지 않고 제출하면 취소할지 이월할지 물어봅니다.</p>`;
 
   document.getElementById('modal-confirm').textContent = '선택 항목 배부완료';
   document.getElementById('modal-confirm').onclick = () => submitDistribute(id, r.items.length);
@@ -1886,12 +1886,12 @@ function checkAllDist(val) {
 }
 async function submitDistribute(id, itemCount) {
   const r = getRequests().find(x => String(x.id) === String(id));
-  const distributed     = [];
-  const dateMap         = {};
-  const methodMap       = {};
-  const qtyMap          = {};
-  const pendingActionMap = {}; // 이번에 체크 안 된 항목 중 취소/이월을 선택한 것들 { idx: 'cancel'|'defer' }
-  let deferCount = 0;
+  const distributed      = [];
+  const dateMap          = {};
+  const methodMap        = {};
+  const qtyMap           = {};
+  const pendingActionMap = {}; // 드롭다운으로 명시적으로 취소/이월을 정한 항목 { idx: 'cancel'|'defer' }
+  const undecided        = []; // 체크도 안 하고 드롭다운도 "보류"로 남긴 항목 — 제출 시 강제로 물어봄
   for (let i = 0; i < itemCount; i++) {
     const item = r?.items?.[i];
     if (!item || item.cancelled) continue;
@@ -1904,17 +1904,29 @@ async function submitDistribute(id, itemCount) {
       if (qtyEl) qtyMap[i] = parseInt(qtyEl.value, 10);
     } else if (!item.distributed) {
       const action = document.getElementById('dist-pending-'+i)?.value || '';
-      if (action === 'cancel' || action === 'defer') {
-        pendingActionMap[i] = action;
-        if (action === 'defer') deferCount++;
-      }
+      if (action === 'cancel' || action === 'defer') pendingActionMap[i] = action;
+      else undecided.push(i);
     }
   }
   if (distributed.length === 0) { toast('배부할 항목을 선택해주세요'); return; }
 
-  // "이월"을 하나라도 선택했으면 공통 다음 배부일이 반드시 필요하다.
+  // 드롭다운으로 미리 정하지 않은 미체크 항목이 남아있으면 제출 전에 반드시 물어본다.
+  if (undecided.length > 0) {
+    const wantCancel = confirm(
+      `처리방법을 정하지 않은 미체크 항목이 ${undecided.length}개 있습니다.\n\n` +
+      `확인: 이 항목들을 취소 처리(재고 자동 복구)\n취소: 다음 배부일로 이월(새 날짜의 새 신청 자동 생성)`
+    );
+    undecided.forEach(idx => { pendingActionMap[idx] = wantCancel ? 'cancel' : 'defer'; });
+  }
+
+  // "이월"로 정해진 항목이 하나라도 있으면 공통 다음 배부일이 반드시 필요하다.
+  const deferCount = Object.values(pendingActionMap).filter(a => a === 'defer').length;
   let deferDate = document.getElementById('dist-defer-date')?.value || '';
-  if (deferCount > 0 && !deferDate) { toast('❌ 이월할 항목이 있습니다. "다음 배부일"을 입력해주세요'); return; }
+  if (deferCount > 0 && !deferDate) {
+    const input = prompt('이월할 항목들의 다음 배부 예정일을 입력하세요 (예: 2026-08-15)', '');
+    if (!input || !/^\d{4}-\d{2}-\d{2}$/.test(input.trim())) { toast('❌ 날짜를 올바르게 입력하지 않아 취소했습니다. 다시 시도해주세요'); return; }
+    deferDate = input.trim();
+  }
 
   closeModal();
   try {
