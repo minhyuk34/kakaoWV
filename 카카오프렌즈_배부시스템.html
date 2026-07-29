@@ -1067,6 +1067,13 @@ function setAdminReqSearch(field, val) {
 }
 function resetAdminReqSearch() {
   adminReqSearchName = ''; adminReqSearchPickup = ''; adminReqSearchUse = '';
+  // 검색바는 매번 다시 그리지 않으므로(포커스 유지를 위해) 입력칸 값도 직접 비워준다
+  const nameEl = document.getElementById('admin-req-search-name');
+  const pickupEl = document.getElementById('admin-req-search-pickup');
+  const useEl = document.getElementById('admin-req-search-use');
+  if (nameEl) nameEl.value = '';
+  if (pickupEl) pickupEl.value = '';
+  if (useEl) useEl.value = '';
   renderAdminRequests();
 }
 function toggleReqSelect(id, checked) {
@@ -1093,24 +1100,34 @@ function renderAdminRequests() {
   if (adminReqSearchPickup) reqs = reqs.filter(r => dateOnly(r.pickupDate) === adminReqSearchPickup);
   if (adminReqSearchUse)    reqs = reqs.filter(r => dateOnly(r.useDate) === adminReqSearchUse);
 
-  const searchBar = `
-  <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;background:#FAFAFA;border-radius:8px;padding:10px 12px">
-    <input type="text" placeholder="🔍 신청인 이름 검색" value="${adminReqSearchName}"
-      oninput="setAdminReqSearch('name', this.value)"
-      style="flex:1;min-width:140px;padding:7px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;outline:none">
-    <label style="font-size:12px;color:var(--muted);white-space:nowrap">수취예정일</label>
-    <input type="date" value="${adminReqSearchPickup}" onchange="setAdminReqSearch('pickup', this.value)"
-      style="padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px">
-    <label style="font-size:12px;color:var(--muted);white-space:nowrap">사용예정일</label>
-    <input type="date" value="${adminReqSearchUse}" onchange="setAdminReqSearch('use', this.value)"
-      style="padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px">
-    ${hasSearch?`<button onclick="resetAdminReqSearch()" style="padding:6px 12px;border:1.5px solid var(--border);border-radius:6px;background:#fff;color:var(--muted);font-size:12px;cursor:pointer;white-space:nowrap">✕ 초기화</button>`:''}
-  </div>`;
+  // 검색바는 최초 1번만 그린다 — 매번 다시 그리면(특히 이름 입력의 oninput마다) DOM이
+  // 통째로 교체되면서 포커스가 끊겨 한 글자 치고 나면 커서가 빠져버린다(한글 조합 입력도 깨짐).
+  if (!document.getElementById('admin-req-search-bar')) {
+    el.innerHTML = `
+    <div id="admin-req-search-bar" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;background:#FAFAFA;border-radius:8px;padding:10px 12px">
+      <input id="admin-req-search-name" type="text" placeholder="🔍 신청인 이름 검색"
+        oninput="setAdminReqSearch('name', this.value)"
+        style="flex:1;min-width:140px;padding:7px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;outline:none">
+      <label style="font-size:12px;color:var(--muted);white-space:nowrap">수취예정일</label>
+      <input id="admin-req-search-pickup" type="date" onchange="setAdminReqSearch('pickup', this.value)"
+        style="padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px">
+      <label style="font-size:12px;color:var(--muted);white-space:nowrap">사용예정일</label>
+      <input id="admin-req-search-use" type="date" onchange="setAdminReqSearch('use', this.value)"
+        style="padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px">
+      <button id="admin-req-search-reset" onclick="resetAdminReqSearch()" style="display:none;padding:6px 12px;border:1.5px solid var(--border);border-radius:6px;background:#fff;color:var(--muted);font-size:12px;cursor:pointer;white-space:nowrap">✕ 초기화</button>
+    </div>
+    <div id="admin-req-results"></div>`;
+  }
+  const resetBtn = document.getElementById('admin-req-search-reset');
+  if (resetBtn) resetBtn.style.display = hasSearch ? '' : 'none';
+
+  const resultsEl = document.getElementById('admin-req-results');
+  if (!resultsEl) return;
 
   if (reqs.length===0){
-    el.innerHTML = searchBar + (hasSearch
+    resultsEl.innerHTML = hasSearch
       ? '<div class="empty"><div class="emoji">🔍</div><p>검색 조건에 맞는 신청이 없습니다</p></div>'
-      : '<div class="empty"><div class="emoji">✅</div><p>처리할 신청이 없습니다</p></div>');
+      : '<div class="empty"><div class="emoji">✅</div><p>처리할 신청이 없습니다</p></div>';
     return;
   }
 
@@ -1124,7 +1141,7 @@ function renderAdminRequests() {
   if (adminReqSort === 'pickupDate')  reqs = [...reqs].sort((a,b)=>byDate(a,b,'pickupDate'));
   else if (adminReqSort === 'useDate') reqs = [...reqs].sort((a,b)=>byDate(a,b,'useDate'));
 
-  el.innerHTML=searchBar+`
+  resultsEl.innerHTML=`
   <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
     <button id="pick-list-btn" onclick="generatePickList()" style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🧾 선택 ${selectedReqIds.size}건 피킹리스트 출력</button>
     <div style="display:flex;align-items:center;gap:8px">
