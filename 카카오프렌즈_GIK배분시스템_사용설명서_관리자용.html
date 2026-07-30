@@ -636,13 +636,42 @@
           <tbody>
             <tr><td><strong>대기중</strong></td><td>관리자 검토 전</td><td>항목별 취소 가능</td></tr>
             <tr><td><strong>승인완료</strong></td><td>관리자 승인, 배부 준비 중</td><td>항목별 취소신청 가능</td></tr>
-            <tr><td><strong>배부완료</strong></td><td>제품 배부 완료</td><td>결과보고서 파일 등록 가능</td></tr>
+            <tr><td><strong>배부완료</strong></td><td>제품 배부 완료</td><td>배부처 기록, 결과보고서 파일 등록 가능</td></tr>
             <tr><td><strong>취소됨</strong></td><td>신청 취소 처리</td><td>—</td></tr>
           </tbody>
         </table>
       </div>
       <div class="info-box blue">
         📎 배부완료 상태에서는 <strong>결과보고서 등록</strong> 버튼이 표시됩니다. 명단(엑셀)과 보고서(PDF/Word)를 업로드하면 구글 드라이브에 자동 저장됩니다.
+      </div>
+
+      <div class="section-title" style="font-size:15px;margin:20px 0 10px">📍 배부처 기록 남기기</div>
+      <p class="section-desc">배부완료된 항목마다 실제로 어디에 몇 개를 나눠줬는지 직접 기록할 수 있습니다. <strong>제품명 · 수량 · 배부처 · 배부수 · 남은개수</strong> 순서의 표로 표시됩니다.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">배부처 · 배부수 입력</div>
+            <div class="step-desc">배부완료된 항목 아래 표에 배부처(예: OO팀, OO기관)와 그곳에 나눠준 수량을 입력합니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">필요하면 행 추가</div>
+            <div class="step-desc">여러 곳에 나눠줬다면 <strong>+ 행 추가</strong> 버튼으로 줄을 늘립니다. 품목당 최대 10줄까지 기록할 수 있습니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">남은개수 확인 후 저장</div>
+            <div class="step-desc">입력한 수량의 합계만큼 <strong>남은개수</strong>가 자동으로 줄어듭니다. 0이 되면 초록색으로 표시됩니다. 다 입력했으면 <strong>💾 저장</strong>을 클릭합니다.</div>
+          </div>
+        </div>
+      </div>
+      <div class="info-box blue">
+        📥 주문내역 상단의 <strong>엑셀 다운로드</strong> 버튼을 누르면 신청 정보와 배부처 기록을 포함한 전체 주문내역을 CSV(엑셀) 파일로 받을 수 있습니다.
       </div>
     </section>
 

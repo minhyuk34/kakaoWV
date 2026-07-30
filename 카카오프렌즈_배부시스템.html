@@ -1408,11 +1408,17 @@ function renderAdminInventory() {
     const requested   = requestedMap[p.num]   || 0;
     const distributed = distributedMap[p.num] || 0;
     totalOriginal += original; totalRequested += requested; totalDistributed += distributed; totalCurrent += current;
+    const reqCell = requested>0
+      ? `<a href="#" onclick="showStockDetail('${p.num}','requested');return false" style="color:var(--blue);text-decoration:underline;cursor:pointer">${requested.toLocaleString()}개</a>`
+      : `${requested.toLocaleString()}개`;
+    const distCell = distributed>0
+      ? `<a href="#" onclick="showStockDetail('${p.num}','distributed');return false" style="color:var(--blue);text-decoration:underline;cursor:pointer">${distributed.toLocaleString()}개</a>`
+      : `${distributed.toLocaleString()}개`;
     return `<tr>
       <td>${p.num}</td><td>${p.name}</td>
       <td>${original.toLocaleString()}개</td>
-      <td>${requested.toLocaleString()}개</td>
-      <td>${distributed.toLocaleString()}개</td>
+      <td>${reqCell}</td>
+      <td>${distCell}</td>
       <td><span style="font-weight:700;color:${current<100?'var(--red)':'var(--green)'}">${current.toLocaleString()}개</span>
         <div class="progress-bar" style="width:100px;margin-top:4px"><div class="progress-fill ${current<100?'low':''}" style="width:${Math.max(0,Math.min(current/1000*100,100))}%"></div></div>
       </td>
@@ -1446,6 +1452,52 @@ function renderAdminInventory() {
   </tr>
   </tbody></table>
   </div>`;
+}
+// 재고관리 표의 신청재고/배부재고 숫자를 클릭하면 누가·언제·몇 개인지 팝업으로 보여줌
+function showStockDetail(num, kind) {
+  const prod = PRODUCTS.find(p => p.num === num);
+  const list = [];
+  getRequests().forEach(r => {
+    if (r.status === 'cancelled' || r.status === 'rejected') return;
+    (r.items || []).forEach(item => {
+      if (item.cancelled) return;
+      if (String(item.num).padStart(3, '0') !== num) return;
+      const isDist = !!item.distributed;
+      if (kind === 'requested' && isDist) return;
+      if (kind === 'distributed' && !isDist) return;
+      list.push({
+        name: r.name || '-',
+        dept: r.dept || '-',
+        team: r.team || '-',
+        date: isDist ? (item.distributeDate || r.updatedAt || r.createdAt) : r.createdAt,
+        qty: isDist ? (item.distributedQty ?? item.qty) : item.qty
+      });
+    });
+  });
+  list.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const total = list.reduce((s, e) => s + (Number(e.qty) || 0), 0);
+  const dateLabel = kind === 'requested' ? '신청일시' : '배부일';
+  const titleLabel = kind === 'requested' ? '📋 신청재고' : '📦 배부재고';
+
+  document.getElementById('modal-title').textContent = `${titleLabel} 상세 — ${prod ? prod.name : num}`;
+  document.getElementById('modal-body').innerHTML = list.length ? `
+    <table style="font-size:13px;width:100%">
+      <thead><tr><th>이름</th><th>본부/팀</th><th>${dateLabel}</th><th style="text-align:right">수량</th></tr></thead>
+      <tbody>${list.map(e => `<tr>
+        <td>${e.name}</td>
+        <td>${e.dept} / ${e.team}</td>
+        <td>${dateOnly(e.date) || e.date || '-'}</td>
+        <td style="text-align:right">${(Number(e.qty) || 0).toLocaleString()}개</td>
+      </tr>`).join('')}</tbody>
+    </table>
+    <div style="text-align:right;margin-top:10px;font-weight:700">합계 ${total.toLocaleString()}개</div>
+  ` : '<div class="empty"><div class="emoji">📭</div><p>내역이 없습니다</p></div>';
+
+  document.getElementById('modal-confirm').textContent = '닫기';
+  document.getElementById('modal-confirm').onclick = closeModal;
+  document.querySelector('.btn-cancel').style.display = 'none';
+  document.getElementById('modal-overlay').classList.add('open');
 }
 // 결과보고서/명단 링크가 관리자메모에 저장되어 있으면 결과보고 완료로 간주
 function hasReportSubmitted(r) {
