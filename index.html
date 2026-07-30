@@ -1013,28 +1013,32 @@ function renderMyRequests() {
       </div>
       ${r.adminNote?`<div style="font-size:12px;background:#FFF3CD;padding:6px 10px;border-radius:6px;margin-bottom:10px">💬 관리자: ${r.adminNote}</div>`:''}
       ${r.status==='distributed'?`<div style="margin-bottom:10px"><button onclick="showReportUpload('${r.id}')" style="background:var(--blue);color:#fff;border:none;border-radius:7px;padding:7px 16px;font-size:13px;font-weight:700;cursor:pointer">📎 결과보고서 등록</button></div>`:''}
-      <table style="font-size:13px;width:100%"><thead><tr><th>제품명</th><th>수량</th><th></th></tr></thead>
+      <table style="font-size:13px;width:100%"><thead><tr><th>제품명</th><th>수량</th><th>배부처 기록</th><th>배부수</th><th>남은개수</th></tr></thead>
       <tbody>${r.items.map((i,idx)=>{
         const isCancelled = i.cancelled||false;
         const isCancelRequested = i.cancelRequested||false;
         const canCancel = r.status==='pending' && !isCancelled && !i.distributed && !isCancelRequested;
         const canRequestCancel = r.status==='approved' && !isCancelled && !i.distributed && !isCancelRequested;
+
+        if (i.distributed) return distLogSectionHtml(r.id, idx, i);
+
         let itemAction = '';
         if (isCancelled) itemAction = '<span style="font-size:11px;color:#aaa">취소됨</span>';
         else if (isCancelRequested) itemAction = '<span style="font-size:11px;background:#FFF3CD;color:#856404;padding:2px 6px;border-radius:8px;font-weight:600">⏳ 취소신청중</span>';
         else if (canCancel) itemAction = `<button onclick="cancelItem('${r.id}',${idx})" style="background:none;border:1px solid #ccc;color:#888;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer">항목취소</button>`;
         else if (canRequestCancel) itemAction = `<button onclick="requestCancelItem('${r.id}',${idx})" style="background:none;border:1.5px solid var(--red);color:var(--red);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-weight:600">취소신청</button>`;
-        const itemRow = `<tr style="${isCancelled?'opacity:0.4;text-decoration:line-through':''}">
+        return `<tr style="${isCancelled?'opacity:0.4;text-decoration:line-through':''}">
           <td>${i.name}</td><td>${i.qty}개</td>
-          <td style="text-align:right">${itemAction}</td>
+          <td colspan="2">${itemAction}</td>
+          <td>-</td>
         </tr>`;
-        const distLogRow = i.distributed ? distLogSectionHtml(r.id, idx, i) : '';
-        return itemRow + distLogRow;
       }).join('')}</tbody></table>
     </div>`).join('');
 }
 
 // ── 배부처 기록 (유저가 실제로 어디에 몇 개를 배부했는지 직접 기록) ──
+// 한 항목을 최대 10줄(배부처/배부수)로 나눠 기록할 수 있으며, 제품명/수량/남은개수는
+// rowspan으로 한 번만 표시하고 배부처/배부수만 줄마다 반복되는 가로 표 형태로 그린다.
 let distLogState = {};
 function distLogKey(reqId, idx) { return reqId + '_' + idx; }
 function distLogTotalQty(item) { return Number(item.distributedQty ?? item.qty) || 0; }
@@ -1048,40 +1052,42 @@ function ensureDistLogState(reqId, idx, existing) {
   }
   return distLogState[key];
 }
-function distLogRowsHtml(reqId, idx, existing) {
-  const arr = ensureDistLogState(reqId, idx, existing);
-  return arr.map((e, li) => `
-    <div style="display:flex;gap:6px;margin-bottom:5px" id="distlog-line-${reqId}-${idx}-${li}">
-      <input type="text" placeholder="배부처 (예: OO팀, OO기관)" value="${escAttr(e.dest)}"
-        oninput="setDistLogField('${reqId}',${idx},${li},'dest',this.value)"
-        style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;outline:none">
-      <input type="number" min="0" placeholder="수량" value="${e.qty}"
-        oninput="setDistLogField('${reqId}',${idx},${li},'qty',this.value)"
-        style="width:70px;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;outline:none">
-      ${arr.length>1?`<button onclick="removeDistLogRow('${reqId}',${idx},${li})" title="이 행 삭제" style="border:none;background:none;color:var(--red);cursor:pointer;font-size:14px;padding:0 4px">✕</button>`:'<span style="width:22px"></span>'}
-    </div>`).join('');
-}
 function distLogSectionHtml(reqId, idx, item) {
   const totalQty = distLogTotalQty(item);
   const arr = ensureDistLogState(reqId, idx, item.distLog);
+  const n = arr.length;
+  const rowspan = n + 1; // 마지막 "+ 행 추가/저장" 컨트롤 행까지 포함해서 병합
   const sum = arr.reduce((s,e)=>s+(Number(e.qty)||0),0);
   const remain = totalQty - sum;
   const remainColor = remain===0 ? 'var(--green)' : (remain<0 ? 'var(--red)' : 'var(--brown)');
-  return `<tr>
-    <td colspan="3" style="padding:10px 8px;background:#FAFAFA;border-radius:8px">
-      <div style="font-size:11px;font-weight:700;color:var(--brown);margin-bottom:6px">📍 배부처 기록 (선택, 최대 10개)</div>
-      <div id="distlog-rows-${reqId}-${idx}">${distLogRowsHtml(reqId, idx, item.distLog)}</div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
-        <button id="distlog-add-${reqId}-${idx}" onclick="addDistLogRow('${reqId}',${idx})" ${arr.length>=10?'disabled':''}
-          style="font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer">+ 행 추가</button>
+
+  const lineRows = arr.map((e, li) => `
+    <tr>
+      ${li===0 ? `<td rowspan="${rowspan}">${item.name}</td><td rowspan="${rowspan}">${totalQty.toLocaleString()}개</td>` : ''}
+      <td>
+        <input type="text" placeholder="배부처 (예: OO팀, OO기관)" value="${escAttr(e.dest)}"
+          oninput="setDistLogField('${reqId}',${idx},${li},'dest',this.value)"
+          style="width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;outline:none">
+      </td>
+      <td style="white-space:nowrap">
+        <input type="number" min="0" placeholder="수량" value="${e.qty}"
+          oninput="setDistLogField('${reqId}',${idx},${li},'qty',this.value)"
+          style="width:70px;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;outline:none">
+        ${n>1?`<button onclick="removeDistLogRow('${reqId}',${idx},${li})" title="이 행 삭제" style="border:none;background:none;color:var(--red);cursor:pointer;font-size:13px;margin-left:2px">✕</button>`:''}
+      </td>
+      ${li===0 ? `<td rowspan="${rowspan}" style="text-align:center;font-weight:700;color:${remainColor}" id="distlog-remain-${reqId}-${idx}">${remain.toLocaleString()}개</td>` : ''}
+    </tr>`).join('');
+
+  const controlsRow = `
+    <tr>
+      <td colspan="2">
+        <button id="distlog-add-${reqId}-${idx}" onclick="addDistLogRow('${reqId}',${idx})" ${n>=10?'disabled':''}
+          style="font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;margin-right:6px">+ 행 추가</button>
         <button onclick="saveDistLogEntry('${reqId}',${idx})" style="font-size:12px;padding:5px 14px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-weight:700;cursor:pointer">💾 저장</button>
-      </div>
-      <div style="display:flex;justify-content:flex-end;gap:16px;margin-top:8px;font-size:12px;font-weight:700">
-        <span>합계 <span id="distlog-total-${reqId}-${idx}">${sum.toLocaleString()}</span>개</span>
-        <span>남은개수 <span id="distlog-remain-${reqId}-${idx}" style="color:${remainColor}">${remain.toLocaleString()}</span>개</span>
-      </div>
-    </td>
-  </tr>`;
+      </td>
+    </tr>`;
+
+  return lineRows + controlsRow;
 }
 function setDistLogField(reqId, idx, li, field, val) {
   const key = distLogKey(reqId, idx);
@@ -1095,7 +1101,7 @@ function addDistLogRow(reqId, idx) {
   const arr = distLogState[key] || (distLogState[key] = [{dest:'',qty:''}]);
   if (arr.length >= 10) { toast('최대 10개까지 추가할 수 있습니다'); return; }
   arr.push({ dest: '', qty: '' });
-  rerenderDistLogRows(reqId, idx);
+  renderMyRequests(); // 행 수가 바뀌면 rowspan을 다시 계산해야 해서 전체를 다시 그린다
 }
 function removeDistLogRow(reqId, idx, li) {
   const key = distLogKey(reqId, idx);
@@ -1103,15 +1109,7 @@ function removeDistLogRow(reqId, idx, li) {
   if (!arr) return;
   arr.splice(li, 1);
   if (arr.length === 0) arr.push({ dest: '', qty: '' });
-  rerenderDistLogRows(reqId, idx);
-}
-function rerenderDistLogRows(reqId, idx) {
-  const container = document.getElementById(`distlog-rows-${reqId}-${idx}`);
-  if (container) container.innerHTML = distLogRowsHtml(reqId, idx);
-  updateDistLogSummary(reqId, idx);
-  const addBtn = document.getElementById(`distlog-add-${reqId}-${idx}`);
-  const arr = distLogState[distLogKey(reqId, idx)] || [];
-  if (addBtn) addBtn.disabled = arr.length >= 10;
+  renderMyRequests();
 }
 function updateDistLogSummary(reqId, idx) {
   const r = getRequests().find(x => String(x.id) === String(reqId));
@@ -1121,11 +1119,9 @@ function updateDistLogSummary(reqId, idx) {
   const arr = distLogState[distLogKey(reqId, idx)] || [];
   const sum = arr.reduce((s,e)=>s+(Number(e.qty)||0),0);
   const remain = totalQty - sum;
-  const totalEl  = document.getElementById(`distlog-total-${reqId}-${idx}`);
   const remainEl = document.getElementById(`distlog-remain-${reqId}-${idx}`);
-  if (totalEl) totalEl.textContent = sum.toLocaleString();
   if (remainEl) {
-    remainEl.textContent = remain.toLocaleString();
+    remainEl.textContent = remain.toLocaleString() + '개';
     remainEl.style.color = remain===0 ? 'var(--green)' : (remain<0 ? 'var(--red)' : 'var(--brown)');
   }
 }
