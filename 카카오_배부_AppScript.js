@@ -1089,6 +1089,7 @@ function doPost(e) {
     else if (action === 'returnDistributedQty') result = returnDistributedQty(data);
     else if (action === 'editDistributedQty') result = editDistributedQty(data);
     else if (action === 'addAdminItem')     result = addAdminItem(data);
+    else if (action === 'saveDistLog')      result = saveDistLog(data);
     else if (action === 'distributeItems') result = distributeItems(data);
     else if (action === 'cancelRequest')   result = cancelRequest(data);
     else if (action === 'cancelItems')       result = cancelItems(data);
@@ -1902,6 +1903,38 @@ function editDistributedQty({ id, idx, newQty, adminName }) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ── 배부처 기록 (유저가 실제로 어디에 몇 개를 배부했는지 직접 기록) ──
+// 재고/상태에는 영향 없이 items[idx].distLog 필드에만 저장하는 단순 기록용 기능.
+function saveDistLog({ id, idx, distLog }) {
+  const s = sheet(SHEET_REQ);
+  const rows = s.getDataRange().getValues();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) !== String(id)) continue;
+
+    const isOld = String(rows[i][8]).trim().startsWith('[') || String(rows[i][8]).trim().startsWith('{');
+    if (isOld) return { ok: false, error: '구형 신청 건은 지원하지 않습니다.' };
+
+    const itemsCol = 10, updatedCol = 13;
+    let items = [];
+    try { items = JSON.parse(rows[i][itemsCol] || '[]'); } catch (e) {}
+
+    if (!items[idx]) return { ok: false, error: '항목을 찾을 수 없습니다.' };
+    if (!items[idx].distributed) return { ok: false, error: '배부완료된 항목만 기록할 수 있습니다.' };
+
+    const cleanLog = (Array.isArray(distLog) ? distLog : []).slice(0, 10)
+      .map(e => ({ dest: String(e.dest || '').trim(), qty: Number(e.qty) || 0 }))
+      .filter(e => e.dest || e.qty);
+    items[idx].distLog = cleanLog;
+
+    s.getRange(i + 1, itemsCol + 1).setValue(JSON.stringify(items));
+    s.getRange(i + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
+
+    return { ok: true };
+  }
+  return { ok: false, error: '신청을 찾을 수 없습니다.' };
 }
 
 // ── 신청하지 않은 물품을 관리자가 추가로 지급 ──────────────────

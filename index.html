@@ -419,7 +419,10 @@ tr:hover td{background:#FFFBF0}
 <div class="page" id="page-myreq">
   <div class="section-header">
     <h2>📋 주문내역</h2>
-    <button onclick="refreshMyReq()" style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🔄 새로고침</button>
+    <div style="display:flex;gap:8px">
+      <button onclick="downloadMyReqExcel()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">📥 엑셀 다운로드</button>
+      <button onclick="refreshMyReq()" style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🔄 새로고침</button>
+    </div>
   </div>
   <div id="myreq-content"></div>
 </div>
@@ -1021,12 +1024,123 @@ function renderMyRequests() {
         else if (isCancelRequested) itemAction = '<span style="font-size:11px;background:#FFF3CD;color:#856404;padding:2px 6px;border-radius:8px;font-weight:600">⏳ 취소신청중</span>';
         else if (canCancel) itemAction = `<button onclick="cancelItem('${r.id}',${idx})" style="background:none;border:1px solid #ccc;color:#888;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer">항목취소</button>`;
         else if (canRequestCancel) itemAction = `<button onclick="requestCancelItem('${r.id}',${idx})" style="background:none;border:1.5px solid var(--red);color:var(--red);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-weight:600">취소신청</button>`;
-        return `<tr style="${isCancelled?'opacity:0.4;text-decoration:line-through':''}">
+        const itemRow = `<tr style="${isCancelled?'opacity:0.4;text-decoration:line-through':''}">
           <td>${i.name}</td><td>${i.qty}개</td>
           <td style="text-align:right">${itemAction}</td>
         </tr>`;
+        const distLogRow = i.distributed ? distLogSectionHtml(r.id, idx, i) : '';
+        return itemRow + distLogRow;
       }).join('')}</tbody></table>
     </div>`).join('');
+}
+
+// ── 배부처 기록 (유저가 실제로 어디에 몇 개를 배부했는지 직접 기록) ──
+let distLogState = {};
+function distLogKey(reqId, idx) { return reqId + '_' + idx; }
+function distLogTotalQty(item) { return Number(item.distributedQty ?? item.qty) || 0; }
+function escAttr(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function ensureDistLogState(reqId, idx, existing) {
+  const key = distLogKey(reqId, idx);
+  if (!distLogState[key]) {
+    distLogState[key] = (existing && existing.length)
+      ? existing.map(e => ({ dest: e.dest || '', qty: e.qty ?? '' }))
+      : [{ dest: '', qty: '' }];
+  }
+  return distLogState[key];
+}
+function distLogRowsHtml(reqId, idx, existing) {
+  const arr = ensureDistLogState(reqId, idx, existing);
+  return arr.map((e, li) => `
+    <div style="display:flex;gap:6px;margin-bottom:5px" id="distlog-line-${reqId}-${idx}-${li}">
+      <input type="text" placeholder="배부처 (예: OO팀, OO기관)" value="${escAttr(e.dest)}"
+        oninput="setDistLogField('${reqId}',${idx},${li},'dest',this.value)"
+        style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;outline:none">
+      <input type="number" min="0" placeholder="수량" value="${e.qty}"
+        oninput="setDistLogField('${reqId}',${idx},${li},'qty',this.value)"
+        style="width:70px;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;outline:none">
+      ${arr.length>1?`<button onclick="removeDistLogRow('${reqId}',${idx},${li})" title="이 행 삭제" style="border:none;background:none;color:var(--red);cursor:pointer;font-size:14px;padding:0 4px">✕</button>`:'<span style="width:22px"></span>'}
+    </div>`).join('');
+}
+function distLogSectionHtml(reqId, idx, item) {
+  const totalQty = distLogTotalQty(item);
+  const arr = ensureDistLogState(reqId, idx, item.distLog);
+  const sum = arr.reduce((s,e)=>s+(Number(e.qty)||0),0);
+  const remain = totalQty - sum;
+  const remainColor = remain===0 ? 'var(--green)' : (remain<0 ? 'var(--red)' : 'var(--brown)');
+  return `<tr>
+    <td colspan="3" style="padding:10px 8px;background:#FAFAFA;border-radius:8px">
+      <div style="font-size:11px;font-weight:700;color:var(--brown);margin-bottom:6px">📍 배부처 기록 (선택, 최대 10개)</div>
+      <div id="distlog-rows-${reqId}-${idx}">${distLogRowsHtml(reqId, idx, item.distLog)}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+        <button id="distlog-add-${reqId}-${idx}" onclick="addDistLogRow('${reqId}',${idx})" ${arr.length>=10?'disabled':''}
+          style="font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer">+ 행 추가</button>
+        <button onclick="saveDistLogEntry('${reqId}',${idx})" style="font-size:12px;padding:5px 14px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-weight:700;cursor:pointer">💾 저장</button>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:16px;margin-top:8px;font-size:12px;font-weight:700">
+        <span>합계 <span id="distlog-total-${reqId}-${idx}">${sum.toLocaleString()}</span>개</span>
+        <span>남은개수 <span id="distlog-remain-${reqId}-${idx}" style="color:${remainColor}">${remain.toLocaleString()}</span>개</span>
+      </div>
+    </td>
+  </tr>`;
+}
+function setDistLogField(reqId, idx, li, field, val) {
+  const key = distLogKey(reqId, idx);
+  const arr = distLogState[key];
+  if (!arr || !arr[li]) return;
+  arr[li][field] = val;
+  updateDistLogSummary(reqId, idx);
+}
+function addDistLogRow(reqId, idx) {
+  const key = distLogKey(reqId, idx);
+  const arr = distLogState[key] || (distLogState[key] = [{dest:'',qty:''}]);
+  if (arr.length >= 10) { toast('최대 10개까지 추가할 수 있습니다'); return; }
+  arr.push({ dest: '', qty: '' });
+  rerenderDistLogRows(reqId, idx);
+}
+function removeDistLogRow(reqId, idx, li) {
+  const key = distLogKey(reqId, idx);
+  const arr = distLogState[key];
+  if (!arr) return;
+  arr.splice(li, 1);
+  if (arr.length === 0) arr.push({ dest: '', qty: '' });
+  rerenderDistLogRows(reqId, idx);
+}
+function rerenderDistLogRows(reqId, idx) {
+  const container = document.getElementById(`distlog-rows-${reqId}-${idx}`);
+  if (container) container.innerHTML = distLogRowsHtml(reqId, idx);
+  updateDistLogSummary(reqId, idx);
+  const addBtn = document.getElementById(`distlog-add-${reqId}-${idx}`);
+  const arr = distLogState[distLogKey(reqId, idx)] || [];
+  if (addBtn) addBtn.disabled = arr.length >= 10;
+}
+function updateDistLogSummary(reqId, idx) {
+  const r = getRequests().find(x => String(x.id) === String(reqId));
+  const item = r?.items?.[idx];
+  if (!item) return;
+  const totalQty = distLogTotalQty(item);
+  const arr = distLogState[distLogKey(reqId, idx)] || [];
+  const sum = arr.reduce((s,e)=>s+(Number(e.qty)||0),0);
+  const remain = totalQty - sum;
+  const totalEl  = document.getElementById(`distlog-total-${reqId}-${idx}`);
+  const remainEl = document.getElementById(`distlog-remain-${reqId}-${idx}`);
+  if (totalEl) totalEl.textContent = sum.toLocaleString();
+  if (remainEl) {
+    remainEl.textContent = remain.toLocaleString();
+    remainEl.style.color = remain===0 ? 'var(--green)' : (remain<0 ? 'var(--red)' : 'var(--brown)');
+  }
+}
+async function saveDistLogEntry(reqId, idx) {
+  const key = distLogKey(reqId, idx);
+  const entries = (distLogState[key]||[])
+    .filter(e => (e.dest||'').toString().trim() || (Number(e.qty)||0) > 0)
+    .map(e => ({ dest: (e.dest||'').toString().trim(), qty: Number(e.qty)||0 }));
+  try {
+    const res = await api('saveDistLog', { id: reqId, idx, distLog: entries });
+    if (!res.ok) { toast('❌ 저장 실패: '+res.error); return; }
+    await loadRequestsFromAPI();
+    toast('✅ 배부처 기록 저장됨');
+    renderMyRequests();
+  } catch(e) { toast('❌ 서버 오류: '+e.message); }
 }
 
 // ── 관리자 ──
@@ -1827,6 +1941,49 @@ async function refreshAdmin() {
 async function refreshMyReq() {
   await loadRequestsFromAPI();
   renderMyRequests();
+}
+// ── 내 주문내역 엑셀(CSV) 다운로드 — 배부처 기록까지 포함, 항목당 배부처 1줄씩 ──
+function csvEscape(val) {
+  const s = String(val ?? '');
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+function downloadMyReqExcel() {
+  const reqs = getRequests().filter(r => r.name === currentUser.name);
+  if (reqs.length === 0) { toast('다운로드할 주문내역이 없습니다'); return; }
+
+  const headers = ['신청일시','상태','본부','팀','이름','연락처','사용처','수취예정일','사용예정일','제품명','신청수량','실배부수량','배부처','배부수량','남은개수'];
+  const rows = [headers];
+
+  reqs.forEach(r => {
+    (r.items||[]).forEach(item => {
+      if (item.cancelled) return;
+      const distQty = item.distributed ? (item.distributedQty ?? item.qty) : '';
+      const logSum = (item.distLog||[]).reduce((s,e)=>s+(Number(e.qty)||0),0);
+      const remain = item.distributed ? (Number(distQty)||0) - logSum : '';
+      const baseRow = [
+        r.createdAt, statusLabel(r.status), r.dept||'', r.team||'', r.name||'', r.contact||'', r.reason||'',
+        dateOnly(r.pickupDate)||'', dateOnly(r.useDate)||'', item.name, item.qty, distQty
+      ];
+      if (item.distLog && item.distLog.length > 0) {
+        item.distLog.forEach((e, ei) => {
+          rows.push([...baseRow, e.dest||'', e.qty||'', ei===item.distLog.length-1 ? remain : '']);
+        });
+      } else {
+        rows.push([...baseRow, '', '', remain]);
+      }
+    });
+  });
+
+  const csvContent = '\uFEFF' + rows.map(row => row.map(csvEscape).join(',')).join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `주문내역_${currentUser.name}_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // 관리자 페이지 자동 갱신 (30초)
