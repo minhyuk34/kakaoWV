@@ -1,5 +1,5 @@
 
-<title>카카오프렌즈 GIK배분시스템 사용설명서</title>
+<title>카카오프렌즈 GIK배분시스템 사용설명서 (직원용)</title>
 <style>
   :root {
     --brown: #3C1E1E;
@@ -411,15 +411,6 @@
       <a class="toc-link" href="#feedback">피드백 남기기</a>
     </div>
 
-    <div class="toc-group" id="admin-toc-group">
-      <div class="toc-group-label">관리자</div>
-      <a class="toc-link admin-link" href="#admin-approve">신청 승인</a>
-      <a class="toc-link admin-link" href="#admin-distribute">배부 처리</a>
-      <a class="toc-link admin-link" href="#admin-cancel">취소 처리</a>
-      <a class="toc-link admin-link" href="#admin-stock">재고 관리</a>
-      <a class="toc-link admin-link" href="#admin-report">배부현황 리포트</a>
-    </div>
-
     <div class="toc-group">
       <div class="toc-group-label">참고</div>
       <a class="toc-link" href="#status">신청 상태 안내</a>
@@ -710,165 +701,6 @@
       </div>
     </section>
 
-    <hr class="divider" id="admin-section-divider">
-
-    <!-- 관리자 섹션 -->
-    <div class="admin-banner">
-      🔐 &nbsp;관리자 전용 기능 — 관리자 계정으로 로그인한 경우에만 표시됩니다
-    </div>
-
-    <!-- 관리자: 승인 -->
-    <section class="section" id="admin-approve">
-      <div class="section-header">
-        <div class="section-number admin">A1</div>
-        <div class="section-title">신청 승인</div>
-      </div>
-      <p class="section-desc">관리자 탭 → <strong>신청 관리</strong>에서 대기중인 신청을 확인하고 승인하거나 반려합니다.</p>
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-body">
-            <div class="step-title">신청 내역 클릭</div>
-            <div class="step-desc">신청 목록에서 <strong>X종 X개 ▶</strong> 링크를 클릭해 상세 팝업을 엽니다.</div>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-body">
-            <div class="step-title">항목별 또는 전체 승인</div>
-            <div class="step-desc">각 항목의 <strong>✓ 승인</strong> 버튼으로 개별 승인하거나, 하단 <strong>✓ 전체 승인</strong>으로 한 번에 처리합니다. 전체 승인 완료 시 신청자에게 이메일이 자동 발송됩니다.</div>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-body">
-            <div class="step-title">반려 처리</div>
-            <div class="step-desc"><strong>✗ 반려</strong> 버튼 클릭 시 반려 사유를 입력할 수 있습니다. 재고가 자동 복구됩니다.</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <hr class="divider">
-
-    <!-- 관리자: 배부 -->
-    <section class="section" id="admin-distribute">
-      <div class="section-header">
-        <div class="section-number admin">A2</div>
-        <div class="section-title">배부 처리</div>
-      </div>
-      <p class="section-desc">승인된 신청에 대해 실제 배부 일자와 방법을 기록합니다.</p>
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-body">
-            <div class="step-title">승인된 신청 열기</div>
-            <div class="step-desc">신청 관리 탭에서 <strong>승인완료</strong> 상태 건의 상세를 엽니다.</div>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-body">
-            <div class="step-title">배부 날짜·방법 입력</div>
-            <div class="step-desc">팝업 하단의 <strong>배부 날짜</strong>와 <strong>배부 방법</strong>(예: 직접전달, 택배)을 입력합니다.</div>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-body">
-            <div class="step-title">📦 배부 처리</div>
-            <div class="step-desc">항목별로 <strong>📦 배부</strong> 버튼을 클릭하거나, <strong>📦 전체 배부완료</strong>로 한 번에 처리합니다. 신청자에게 배부완료 이메일이 자동 발송됩니다.</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <hr class="divider">
-
-    <!-- 관리자: 취소 처리 -->
-    <section class="section" id="admin-cancel">
-      <div class="section-header">
-        <div class="section-number admin">A3</div>
-        <div class="section-title">취소 처리</div>
-      </div>
-      <p class="section-desc">직접 취소하거나 유저의 취소신청을 확정/거절합니다. 취소 시 재고 자동 복구됩니다.</p>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>상황</th><th>버튼</th><th>결과</th></tr></thead>
-          <tbody>
-            <tr><td>관리자가 직접 항목 취소</td><td>✕ 취소</td><td>즉시 취소, 재고 복구</td></tr>
-            <tr><td>관리자가 신청 전체 취소</td><td>🚫 전체취소</td><td>전체 취소, 재고 복구</td></tr>
-            <tr><td>유저 취소신청 확정</td><td>✓ 취소확정</td><td>항목 취소, 재고 복구</td></tr>
-            <tr><td>유저 취소신청 거절</td><td>✕ 거절</td><td>취소신청 취소, 상태 유지</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <hr class="divider">
-
-    <!-- 관리자: 재고 -->
-    <section class="section" id="admin-stock">
-      <div class="section-header">
-        <div class="section-number admin">A4</div>
-        <div class="section-title">재고 관리</div>
-      </div>
-      <p class="section-desc">관리자 탭 → <strong>재고 관리</strong>에서 현재 재고를 확인하고 수정합니다.</p>
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-body">
-            <div class="step-title">재고 직접 수정</div>
-            <div class="step-desc">각 제품의 수량 입력란에 숫자를 입력하고 <strong>수정</strong> 버튼을 클릭합니다.</div>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-body">
-            <div class="step-title">재고 재계산 (syncStock)</div>
-            <div class="step-desc">구글 시트에서 행을 직접 삭제하거나 데이터 불일치 발생 시, Apps Script에서 <strong>syncStock</strong> 함수를 실행하면 전체 재고가 활성 신청 기준으로 재계산됩니다.</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <hr class="divider">
-
-    <!-- 관리자: 리포트 -->
-    <section class="section" id="admin-report">
-      <div class="section-header">
-        <div class="section-number admin">A5</div>
-        <div class="section-title">배부현황 리포트</div>
-      </div>
-      <p class="section-desc">Apps Script의 <strong>generateReport</strong> 함수를 실행하면 구글 시트에 "배부현황" 탭이 생성됩니다.</p>
-      <div class="info-box blue">
-        📊 리포트 구조: <strong>제품명(행) × 신청팀/담당자(열)</strong> 피벗 표. 총재고 · 팀별 배부수량 · 배부합계 · 잔여재고 표시. 재고가 0이면 빨간색으로 강조.
-      </div>
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-body">
-            <div class="step-title">Apps Script 편집기 열기</div>
-            <div class="step-desc">구글 시트에서 상단 메뉴 → 확장 프로그램 → Apps Script를 클릭합니다.</div>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-body">
-            <div class="step-title">generateReport 선택 후 실행</div>
-            <div class="step-desc">상단 함수 드롭다운에서 <strong>generateReport</strong>를 선택하고 ▶️ 실행 버튼을 클릭합니다.</div>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-body">
-            <div class="step-title">구글 시트 "배부현황" 탭 확인</div>
-            <div class="step-desc">실행 완료 후 구글 시트로 돌아가 "배부현황" 탭을 확인합니다. 이 탭에서 피벗 테이블을 추가로 만들 수 있습니다.</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <hr class="divider">
 
     <!-- 상태 안내 -->
@@ -944,18 +776,3 @@
 
   </main>
 </div>
-
-<script>
-// URL에 ?admin=1 이 없으면 관리자 전용 섹션(TOC/배너/구분선/A1~A5 본문)을 숨긴다.
-// 일반 직원용 "사용설명서" 버튼은 파라미터 없이 링크하고, 관리자 전용 링크만 ?admin=1을 붙인다.
-(function () {
-  var isAdmin = new URLSearchParams(location.search).get('admin') === '1';
-  if (isAdmin) return;
-  var toc = document.getElementById('admin-toc-group');
-  if (toc) toc.style.display = 'none';
-  var divider = document.getElementById('admin-section-divider');
-  if (divider) divider.style.display = 'none';
-  document.querySelectorAll('.admin-banner').forEach(function (el) { el.style.display = 'none'; });
-  document.querySelectorAll('section[id^="admin-"]').forEach(function (el) { el.style.display = 'none'; });
-})();
-</script>

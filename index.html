@@ -686,11 +686,15 @@ function notifyPendingReportsIfAny() {
     alert(`📎 결과보고가 필요합니다\n\n등록하지 않은 결과보고가 ${needed.length}건 있습니다.\n"내 역" 메뉴에서 확인 후 등록해주세요.`);
   }
 }
-// 관리자로 로그인한 경우 사용설명서의 관리자 전용 섹션(A1~A5)까지 함께 보이도록 ?admin=1을 붙인다.
+// 관리자용/직원용 사용설명서를 완전히 별개 파일로 분리 — 직원용 파일은 관리자 섹션
+// 자체가 물리적으로 없어서 페이지 소스를 봐도 관리자 기능이 노출되지 않는다.
 // 구글 드라이브가 회사 네트워크에서 막혀있는 경우가 있어 같은 저장소(GitHub Pages)에서 서빙한다.
 function openManual() {
   const isAdmin = currentUser?.role === 'admin';
-  window.open('카카오프렌즈_GIK배분시스템_사용설명서.html' + (isAdmin ? '?admin=1' : ''), '_blank');
+  const file = isAdmin
+    ? '카카오프렌즈_GIK배분시스템_사용설명서_관리자용.html'
+    : '카카오프렌즈_GIK배분시스템_사용설명서_직원용.html';
+  window.open(file, '_blank');
 }
 function doLogout() {
   currentUser=null; sessionStorage.removeItem('currentUser'); cart={};
