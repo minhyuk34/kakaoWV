@@ -1274,36 +1274,68 @@ async function refreshReportSheet() {
 }
 function renderAdminInventory() {
   const el=document.getElementById('admin-inventory');
-  let totalOriginal=0, totalDistributed=0, totalCurrent=0;
+
+  // 제품별로 "신청만 되고 아직 배부 안 된 수량"과 "배부완료된 수량"을 나눠서 집계
+  const requestedMap = {};   // 신청됐지만 미배부
+  const distributedMap = {}; // 배부완료(반품 반영된 실배부수량 기준)
+  getRequests().forEach(r => {
+    if (r.status === 'cancelled' || r.status === 'rejected') return;
+    (r.items || []).forEach(item => {
+      if (item.cancelled) return;
+      const num = String(item.num).padStart(3, '0');
+      if (item.distributed) {
+        distributedMap[num] = (distributedMap[num] || 0) + Number(item.distributedQty ?? item.qty);
+      } else {
+        requestedMap[num] = (requestedMap[num] || 0) + Number(item.qty);
+      }
+    });
+  });
+
+  let totalOriginal=0, totalRequested=0, totalDistributed=0, totalCurrent=0;
   const rows = PRODUCTS.map(p=>{
-    const current  = getStock(p.num);
-    const original = getOriginalStock(p.num);
-    const distributed = Math.max(0, original - current);
-    totalOriginal += original; totalDistributed += distributed; totalCurrent += current;
+    const current     = getStock(p.num);
+    const original    = getOriginalStock(p.num);
+    const requested   = requestedMap[p.num]   || 0;
+    const distributed = distributedMap[p.num] || 0;
+    totalOriginal += original; totalRequested += requested; totalDistributed += distributed; totalCurrent += current;
     return `<tr>
       <td>${p.num}</td><td>${p.name}</td>
       <td>${original.toLocaleString()}개</td>
+      <td>${requested.toLocaleString()}개</td>
       <td>${distributed.toLocaleString()}개</td>
       <td><span style="font-weight:700;color:${current<100?'var(--red)':'var(--green)'}">${current.toLocaleString()}개</span>
         <div class="progress-bar" style="width:100px;margin-top:4px"><div class="progress-fill ${current<100?'low':''}" style="width:${Math.max(0,Math.min(current/1000*100,100))}%"></div></div>
       </td>
     </tr>`;
   }).join('');
+
+  const thStyle = 'position:sticky;top:0;background:var(--brown);color:var(--kakao);z-index:1';
   el.innerHTML=`<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
     <button onclick="refreshReportSheet()" id="report-refresh-btn"
       style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">
       📊 배부현황 시트 새로고침
     </button>
   </div>
-  <table><thead><tr><th>No.</th><th>제품명</th><th>최초재고</th><th>신청(배부)재고</th><th>현재재고</th></tr></thead>
+  <div style="max-height:70vh;overflow-y:auto;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+  <table style="overflow:visible;box-shadow:none;border-radius:0">
+  <thead><tr>
+    <th style="${thStyle}">No.</th>
+    <th style="${thStyle}">제품명</th>
+    <th style="${thStyle}">최초재고</th>
+    <th style="${thStyle}">신청재고</th>
+    <th style="${thStyle}">배부재고</th>
+    <th style="${thStyle}">현재재고</th>
+  </tr></thead>
   <tbody>${rows}
   <tr style="font-weight:700;background:var(--tag-bg)">
     <td colspan="2">합계</td>
     <td>${totalOriginal.toLocaleString()}개</td>
+    <td>${totalRequested.toLocaleString()}개</td>
     <td>${totalDistributed.toLocaleString()}개</td>
     <td>${totalCurrent.toLocaleString()}개</td>
   </tr>
-  </tbody></table>`;
+  </tbody></table>
+  </div>`;
 }
 // 결과보고서/명단 링크가 관리자메모에 저장되어 있으면 결과보고 완료로 간주
 function hasReportSubmitted(r) {
