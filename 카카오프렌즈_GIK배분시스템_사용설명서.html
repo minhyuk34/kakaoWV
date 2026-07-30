@@ -1,0 +1,961 @@
+
+<title>카카오프렌즈 GIK배분시스템 사용설명서</title>
+<style>
+  :root {
+    --brown: #3C1E1E;
+    --brown-mid: #6B3A2A;
+    --yellow: #FEE500;
+    --yellow-pale: #FFF9D6;
+    --bg: #F7F5F2;
+    --surface: #FFFFFF;
+    --text: #1C1C1C;
+    --muted: #6B6460;
+    --border: #E4DED8;
+    --green: #1A7F4B;
+    --blue: #1557A0;
+    --red: #C0392B;
+    --tag-bg: #EDE8E3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1A1512;
+      --surface: #251E1A;
+      --text: #F0EBE5;
+      --muted: #9A908A;
+      --border: #3A302A;
+      --tag-bg: #302820;
+      --yellow-pale: #2A2410;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #F7F5F2; --surface: #FFFFFF; --text: #1C1C1C;
+    --muted: #6B6460; --border: #E4DED8; --tag-bg: #EDE8E3; --yellow-pale: #FFF9D6;
+  }
+  :root[data-theme="dark"] {
+    --bg: #1A1512; --surface: #251E1A; --text: #F0EBE5;
+    --muted: #9A908A; --border: #3A302A; --tag-bg: #302820; --yellow-pale: #2A2410;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  @page { margin: 10mm 12mm; }
+
+  /* ── Layout ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 100vh;
+    max-width: 1100px;
+    margin: 0 auto;
+    gap: 0;
+  }
+
+  /* ── Sidebar TOC ── */
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 32px 20px;
+    background: var(--brown);
+    color: #fff;
+  }
+  .sidebar-logo {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    color: var(--yellow);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .sidebar-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(255,255,255,.85);
+    line-height: 1.4;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255,255,255,.12);
+  }
+  .toc-group { margin-bottom: 18px; }
+  .toc-group-label {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .1em;
+    color: rgba(255,255,255,.4);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .toc-link {
+    display: block;
+    font-size: 13px;
+    color: rgba(255,255,255,.7);
+    text-decoration: none;
+    padding: 4px 8px;
+    border-radius: 5px;
+    margin-bottom: 2px;
+    transition: background .15s, color .15s;
+  }
+  .toc-link:hover { background: rgba(255,255,255,.1); color: var(--yellow); }
+  .toc-link.admin-link { color: rgba(254,229,0,.6); }
+  .toc-link.admin-link:hover { color: var(--yellow); }
+
+  /* ── Content ── */
+  .content {
+    padding: 48px 52px;
+    max-width: 820px;
+  }
+
+  /* ── Cover ── */
+  .cover {
+    background: var(--brown);
+    color: #fff;
+    border-radius: 16px;
+    padding: 48px 44px;
+    margin-bottom: 48px;
+    position: relative;
+    overflow: hidden;
+  }
+  .cover::after {
+    content: '🐾';
+    position: absolute;
+    right: 32px;
+    bottom: 20px;
+    font-size: 80px;
+    opacity: .12;
+  }
+  .cover-eyebrow {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .12em;
+    color: var(--yellow);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .cover-title {
+    font-size: 28px;
+    font-weight: 900;
+    line-height: 1.25;
+    color: #fff;
+    margin-bottom: 10px;
+    text-wrap: balance;
+  }
+  .cover-sub {
+    font-size: 14px;
+    color: rgba(255,255,255,.6);
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+  .cover-meta {
+    display: flex;
+    gap: 20px;
+    font-size: 12px;
+    color: rgba(255,255,255,.5);
+  }
+  .cover-meta b { color: var(--yellow); }
+
+  /* ── Print button ── */
+  .print-btn-wrap {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 32px;
+  }
+  .print-btn {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 18px;
+    background: var(--yellow);
+    color: var(--brown);
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity .15s;
+  }
+  .print-btn:hover { opacity: .85; }
+
+  /* ── Section ── */
+  .section { margin-bottom: 48px; }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border);
+  }
+  .section-number {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: var(--brown);
+    color: var(--yellow);
+    font-size: 13px;
+    font-weight: 900;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .section-number.admin { background: #1557A0; color: #fff; }
+  .section-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text);
+  }
+  .section-desc {
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 18px;
+    line-height: 1.7;
+  }
+
+  /* ── Step list ── */
+  .steps { display: flex; flex-direction: column; gap: 12px; }
+  .step {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 12px;
+    align-items: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .step-num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--yellow);
+    color: var(--brown);
+    font-size: 12px;
+    font-weight: 900;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .step-body { }
+  .step-title { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+  .step-desc { font-size: 13px; color: var(--muted); line-height: 1.65; }
+
+  /* ── Info box ── */
+  .info-box {
+    background: var(--yellow-pale);
+    border: 1px solid rgba(254,229,0,.4);
+    border-left: 4px solid var(--yellow);
+    border-radius: 8px;
+    padding: 13px 16px;
+    font-size: 13px;
+    line-height: 1.7;
+    margin: 14px 0;
+    color: var(--text);
+  }
+  .info-box.red {
+    background: #FFF0EE;
+    border-color: #FFBDB5;
+    border-left-color: var(--red);
+  }
+  .info-box.green {
+    background: #EDF7F2;
+    border-color: #A8DFBE;
+    border-left-color: var(--green);
+  }
+  .info-box.blue {
+    background: #EEF4FF;
+    border-color: #B0CCFF;
+    border-left-color: var(--blue);
+  }
+  @media (prefers-color-scheme: dark) {
+    .info-box.red { background: #2A1210; border-color: #5A2020; }
+    .info-box.green { background: #0E2018; border-color: #1A4530; }
+    .info-box.blue { background: #0E1828; border-color: #1A3058; }
+  }
+  :root[data-theme="dark"] .info-box.red { background: #2A1210; border-color: #5A2020; }
+  :root[data-theme="dark"] .info-box.green { background: #0E2018; border-color: #1A4530; }
+  :root[data-theme="dark"] .info-box.blue { background: #0E1828; border-color: #1A3058; }
+
+  /* ── Status badge ── */
+  .badge-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .badge.pending { background: #FFF3CD; color: #856404; }
+  .badge.approved { background: #D4EDDA; color: #155724; }
+  .badge.distributed { background: #CCE5FF; color: #004085; }
+  .badge.cancelled { background: #f8d7da; color: #721c24; }
+  .badge.cancel-req { background: #FFF3CD; color: #856404; }
+
+  /* ── Table ── */
+  .table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--border); margin: 14px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead tr { background: var(--brown); color: var(--yellow); }
+  th { padding: 10px 14px; text-align: left; font-weight: 700; white-space: nowrap; }
+  td { padding: 10px 14px; border-top: 1px solid var(--border); vertical-align: top; }
+  tr:nth-child(even) td { background: var(--tag-bg); }
+
+  /* ── Feature grid ── */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 14px 0;
+  }
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .feature-icon { font-size: 22px; margin-bottom: 7px; }
+  .feature-title { font-size: 14px; font-weight: 800; margin-bottom: 4px; }
+  .feature-desc { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+  /* ── Admin section ── */
+  .admin-banner {
+    background: #1557A0;
+    color: #fff;
+    border-radius: 10px;
+    padding: 12px 18px;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  /* ── Divider ── */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 40px 0;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 720px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static; height: auto; }
+    .content { padding: 24px 20px; }
+    .feature-grid { grid-template-columns: 1fr; }
+    .cover { padding: 32px 24px; }
+  }
+  /* ── Print (kept last so it always wins over unconditional rules above) ── */
+  @media print {
+    body { background: #fff; color: #111; font-size: 12.5px; line-height: 1.55; }
+    .no-print, .sidebar, .print-btn-wrap { display: none !important; }
+    .layout { display: block; max-width: 100%; }
+    .content { max-width: 100%; margin: 0; padding: 0; }
+    .cover { page-break-after: avoid; margin-bottom: 20px; padding: 22px 26px; }
+    .cover-title { font-size: 22px; }
+    .cover-sub { font-size: 12.5px; margin-bottom: 14px; }
+    .admin-banner { margin-bottom: 14px; padding: 8px 14px; font-size: 12px; }
+    .section { page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px; }
+    .section-header { margin-bottom: 10px; padding-bottom: 7px; }
+    .section-number { width: 24px; height: 24px; font-size: 11px; border-radius: 6px; }
+    .section-title { font-size: 15px; }
+    .section-desc { font-size: 12px; margin-bottom: 10px; line-height: 1.6; }
+    .steps { gap: 7px; }
+    .step { display: flex; padding: 8px 10px; gap: 8px; break-inside: avoid; }
+    .step-num { flex: 0 0 20px; width: 20px; height: 20px; font-size: 10px; }
+    .step-body { flex: 1 1 auto; min-width: 0; }
+    .step-title { font-size: 12px; margin-bottom: 2px; }
+    .step-desc { font-size: 11.5px; line-height: 1.55; }
+    .feature-card, td, th, .section-desc, .info-box, .cover { min-width: 0; }
+    .info-box { font-size: 11.5px; line-height: 1.55; padding: 8px 10px; margin: 8px 0; }
+    .badge-row { gap: 6px; margin: 8px 0; }
+    .badge { padding: 3px 10px; font-size: 11px; }
+    .feature-grid { display: flex; flex-direction: column; gap: 7px; margin: 8px 0; }
+    .feature-card { padding: 9px 11px; min-width: 0; }
+    .feature-icon { font-size: 15px; margin-bottom: 3px; }
+    .feature-title { font-size: 12px; margin-bottom: 2px; }
+    .feature-desc { font-size: 11px; line-height: 1.5; }
+    table, th, td { font-size: 10.5px; }
+    th, td { padding: 5px 8px; }
+    .table-wrap { margin: 8px 0; }
+    .divider { margin: 16px 0; }
+    a { color: inherit; text-decoration: none; }
+    :root { --border: #ddd; --surface: #fff; --text: #111; --muted: #444;
+            --brown: #3C1E1E; --yellow: #FEE500; --yellow-pale: #FFFDE0;
+            --tag-bg: #f5f3f0; --green: #1A7F4B; --blue: #1557A0; --red: #C0392B; }
+  }
+</style>
+
+<div class="layout">
+
+  <!-- Sidebar -->
+  <nav class="sidebar no-print">
+    <div class="sidebar-logo">World Vision</div>
+    <div class="sidebar-title">카카오프렌즈<br>GIK배분시스템<br>사용설명서</div>
+
+    <div class="toc-group">
+      <div class="toc-group-label">일반 직원</div>
+      <a class="toc-link" href="#intro">시스템 소개</a>
+      <a class="toc-link" href="#account">계정 만들기</a>
+      <a class="toc-link" href="#catalog">제품 목록 보기</a>
+      <a class="toc-link" href="#order">신청하기</a>
+      <a class="toc-link" href="#myreq">주문내역 확인</a>
+      <a class="toc-link" href="#cancel">취소 신청</a>
+      <a class="toc-link" href="#feedback">피드백 남기기</a>
+    </div>
+
+    <div class="toc-group" id="admin-toc-group">
+      <div class="toc-group-label">관리자</div>
+      <a class="toc-link admin-link" href="#admin-approve">신청 승인</a>
+      <a class="toc-link admin-link" href="#admin-distribute">배부 처리</a>
+      <a class="toc-link admin-link" href="#admin-cancel">취소 처리</a>
+      <a class="toc-link admin-link" href="#admin-stock">재고 관리</a>
+      <a class="toc-link admin-link" href="#admin-report">배부현황 리포트</a>
+    </div>
+
+    <div class="toc-group">
+      <div class="toc-group-label">참고</div>
+      <a class="toc-link" href="#status">신청 상태 안내</a>
+      <a class="toc-link" href="#faq">자주 묻는 질문</a>
+    </div>
+  </nav>
+
+  <!-- Content -->
+  <main class="content">
+
+    <!-- Print button -->
+    <div class="print-btn-wrap no-print">
+      <button class="print-btn" onclick="window.print()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        PDF로 저장
+      </button>
+    </div>
+
+    <!-- Cover -->
+    <div class="cover">
+      <div class="cover-eyebrow">사용설명서 · User Manual</div>
+      <div class="cover-title">카카오프렌즈<br>GIK배분시스템</div>
+      <div class="cover-sub">월드비전 내부 직원 전용 카카오프렌즈 GIK제품 배부 신청 및 관리 시스템입니다.</div>
+      <div class="cover-meta">
+        <span>🔒 <b>내부 전용</b> — 외부 유출 금지</span>
+        <span>📅 <b>2026년 7월</b> 기준</span>
+      </div>
+    </div>
+
+    <!-- 1. 시스템 소개 -->
+    <section class="section" id="intro">
+      <div class="section-header">
+        <div class="section-number">1</div>
+        <div class="section-title">시스템 소개</div>
+      </div>
+      <p class="section-desc">카카오프렌즈 GIK배분시스템은 월드비전 내부 직원이 카카오프렌즈 GIK(현물기부) 제품을 신청하고, 담당 관리자가 승인·배부를 처리하는 내부 관리 플랫폼입니다.</p>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon">🛍️</div>
+          <div class="feature-title">제품 카탈로그</div>
+          <div class="feature-desc">144종 카카오프렌즈 제품을 카테고리별로 검색하고 장바구니에 담아 한 번에 신청</div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">✅</div>
+          <div class="feature-title">승인 워크플로</div>
+          <div class="feature-desc">신청 → 관리자 승인 → 배부 순서로 처리되며 각 단계별 이메일 알림 발송</div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📦</div>
+          <div class="feature-title">실시간 재고 관리</div>
+          <div class="feature-desc">신청 즉시 재고 차감, 취소 시 자동 복구. 관리자는 전체 재고 현황 실시간 확인 가능</div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📊</div>
+          <div class="feature-title">배부현황 리포트</div>
+          <div class="feature-desc">제품×팀 피벗 표로 어디에 몇 개 나갔는지 한눈에 파악, 구글 시트 자동 생성</div>
+        </div>
+      </div>
+      <div class="info-box red">
+        🔒 <strong>내부 전용 시스템입니다.</strong> 접속 URL을 외부에 공유하거나 스크린샷을 외부로 유출하지 말아주세요.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 2. 계정 만들기 -->
+    <section class="section" id="account">
+      <div class="section-header">
+        <div class="section-number">2</div>
+        <div class="section-title">계정 만들기 · 로그인</div>
+      </div>
+      <p class="section-desc">처음 사용하는 경우 회원가입이 필요합니다. 이름과 비밀번호만 설정하면 바로 사용할 수 있습니다.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">시스템 접속</div>
+            <div class="step-desc">관리자로부터 전달받은 URL로 접속합니다. 로그인 화면이 표시됩니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">회원가입 클릭</div>
+            <div class="step-desc">처음 이용 시 로그인 화면 상단의 <strong>회원가입</strong> 탭을 클릭합니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">정보 입력</div>
+            <div class="step-desc">이름(실명), 이메일(업무용), 비밀번호를 입력하고 <strong>가입하기</strong>를 클릭합니다. 이름은 신청서에 그대로 표시되므로 실명으로 입력해주세요.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <div class="step-title">로그인</div>
+            <div class="step-desc">가입한 이름과 비밀번호로 로그인합니다. 이후부터는 같은 계정으로 접속하면 됩니다.</div>
+          </div>
+        </div>
+      </div>
+      <div class="info-box">
+        💡 비밀번호는 암호화되어 저장되므로 관리자도 확인할 수 없습니다. 분실 시 관리자에게 계정 재생성을 요청하세요.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 3. 제품 목록 -->
+    <section class="section" id="catalog">
+      <div class="section-header">
+        <div class="section-number">3</div>
+        <div class="section-title">제품 목록 보기</div>
+      </div>
+      <p class="section-desc">로그인하면 카카오프렌즈 제품 카탈로그 화면이 표시됩니다. 144종 제품을 카테고리, 재고 여부로 필터링하거나 이름으로 검색할 수 있습니다.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">검색 / 필터</div>
+            <div class="step-desc">상단 검색창에 제품명 또는 번호를 입력합니다. <strong>전체 제품 / 재고 있음</strong> 필터와 카테고리 드롭다운으로 원하는 제품을 빠르게 찾을 수 있습니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">재고 확인</div>
+            <div class="step-desc">각 카드의 재고 숫자를 확인합니다. <strong>재고가 0인 제품은 목록에 표시되지 않습니다.</strong> 필요한 경우 관리자에게 재고 추가를 요청하세요.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">제품 이미지 확대</div>
+            <div class="step-desc">제품 이미지를 클릭하면 크게 볼 수 있습니다.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 4. 신청하기 -->
+    <section class="section" id="order">
+      <div class="section-header">
+        <div class="section-number">4</div>
+        <div class="section-title">신청하기</div>
+      </div>
+      <p class="section-desc">원하는 제품을 장바구니에 담은 후 신청 정보를 입력하여 배부 신청을 완료합니다.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">수량 입력 후 장바구니 담기</div>
+            <div class="step-desc">제품 카드에서 신청할 수량을 입력하고 <strong>장바구니 담기</strong> 버튼을 클릭합니다. 여러 제품을 한 번에 담을 수 있습니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">장바구니 확인</div>
+            <div class="step-desc">상단 <strong>📋 장바구니</strong> 버튼을 클릭합니다. 담긴 제품 목록과 합계 금액을 확인합니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">상세사업 입력 (필수)</div>
+            <div class="step-desc">각 제품 아래 <strong>상세사업 입력란(노란 테두리)</strong>에 사용 목적을 구체적으로 입력합니다. 예: "아동 직접 배부용(후원자대상 성탄캠페인)"</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <div class="step-title">신청 정보 입력</div>
+            <div class="step-desc">본부, 팀, 이름, 연락처(자동 하이픈 처리), 이메일, 사용처, 수취 예정일, 사용 예정일을 입력합니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <div class="step-title">배부요청 완료</div>
+            <div class="step-desc"><strong>배부요청</strong> 버튼을 클릭하면 신청이 완료됩니다. 재고가 즉시 차감되고 관리자에게 신청 내역이 전달됩니다.</div>
+          </div>
+        </div>
+      </div>
+      <div class="info-box green">
+        ✉️ 관리자가 신청을 승인하면 입력하신 이메일로 <strong>승인 알림 메일</strong>이 자동 발송됩니다.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 5. 주문내역 -->
+    <section class="section" id="myreq">
+      <div class="section-header">
+        <div class="section-number">5</div>
+        <div class="section-title">주문내역 확인</div>
+      </div>
+      <p class="section-desc">상단 <strong>주문내역</strong> 탭에서 내가 신청한 모든 건의 현황을 확인할 수 있습니다.</p>
+      <div class="badge-row">
+        <span class="badge pending">⏳ 대기중</span>
+        <span class="badge approved">✅ 승인완료</span>
+        <span class="badge distributed">📦 배부완료</span>
+        <span class="badge cancel-req">⏳ 취소신청중</span>
+        <span class="badge cancelled">✕ 취소됨</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>상태</th><th>의미</th><th>가능한 행동</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>대기중</strong></td><td>관리자 검토 전</td><td>항목별 취소 가능</td></tr>
+            <tr><td><strong>승인완료</strong></td><td>관리자 승인, 배부 준비 중</td><td>항목별 취소신청 가능</td></tr>
+            <tr><td><strong>배부완료</strong></td><td>제품 배부 완료</td><td>결과보고서 파일 등록 가능</td></tr>
+            <tr><td><strong>취소됨</strong></td><td>신청 취소 처리</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="info-box blue">
+        📎 배부완료 상태에서는 <strong>결과보고서 등록</strong> 버튼이 표시됩니다. 명단(엑셀)과 보고서(PDF/Word)를 업로드하면 구글 드라이브에 자동 저장됩니다.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 6. 취소 신청 -->
+    <section class="section" id="cancel">
+      <div class="section-header">
+        <div class="section-number">6</div>
+        <div class="section-title">취소 신청</div>
+      </div>
+      <p class="section-desc">신청 상태에 따라 취소 방식이 다릅니다. 취소 시 해당 수량은 재고에 자동 복구됩니다.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">🕐</div>
+          <div class="step-body">
+            <div class="step-title">대기중 상태 — 즉시 취소</div>
+            <div class="step-desc">주문내역의 각 항목 옆 <strong>항목취소</strong> 버튼을 클릭하면 즉시 취소됩니다. 재고가 바로 복구됩니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">✅</div>
+          <div class="step-body">
+            <div class="step-title">승인완료 상태 — 취소신청</div>
+            <div class="step-desc">각 항목 옆 <strong>취소신청</strong> 버튼을 클릭합니다. 관리자에게 취소 요청이 전달되며 <strong>⏳ 취소신청중</strong> 상태로 변경됩니다. 관리자가 확정해야 최종 취소됩니다.</div>
+          </div>
+        </div>
+      </div>
+      <div class="info-box">
+        💡 배부완료 상태에서는 취소가 불가합니다. 관리자에게 직접 문의하세요.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 7. 피드백 -->
+    <section class="section" id="feedback">
+      <div class="section-header">
+        <div class="section-number">7</div>
+        <div class="section-title">피드백 남기기</div>
+      </div>
+      <p class="section-desc">상단 <strong>💬 피드백</strong> 탭에서 시스템 이용 후기나 개선 의견을 남길 수 있습니다.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">별점 선택</div>
+            <div class="step-desc">★☆☆☆☆ ~ ★★★★★ 중 만족도에 맞게 선택합니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">분류 선택</div>
+            <div class="step-desc">UI/디자인, 기능, 속도, 오류, 건의사항, 기타 중 하나를 선택합니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">의견 작성 후 제출</div>
+            <div class="step-desc">자유롭게 의견을 작성하고 <strong>피드백 제출</strong>을 클릭합니다. 내용은 구글 시트 "피드백" 탭에 저장되며 관리자가 확인합니다.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" id="admin-section-divider">
+
+    <!-- 관리자 섹션 -->
+    <div class="admin-banner">
+      🔐 &nbsp;관리자 전용 기능 — 관리자 계정으로 로그인한 경우에만 표시됩니다
+    </div>
+
+    <!-- 관리자: 승인 -->
+    <section class="section" id="admin-approve">
+      <div class="section-header">
+        <div class="section-number admin">A1</div>
+        <div class="section-title">신청 승인</div>
+      </div>
+      <p class="section-desc">관리자 탭 → <strong>신청 관리</strong>에서 대기중인 신청을 확인하고 승인하거나 반려합니다.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">신청 내역 클릭</div>
+            <div class="step-desc">신청 목록에서 <strong>X종 X개 ▶</strong> 링크를 클릭해 상세 팝업을 엽니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">항목별 또는 전체 승인</div>
+            <div class="step-desc">각 항목의 <strong>✓ 승인</strong> 버튼으로 개별 승인하거나, 하단 <strong>✓ 전체 승인</strong>으로 한 번에 처리합니다. 전체 승인 완료 시 신청자에게 이메일이 자동 발송됩니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">반려 처리</div>
+            <div class="step-desc"><strong>✗ 반려</strong> 버튼 클릭 시 반려 사유를 입력할 수 있습니다. 재고가 자동 복구됩니다.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 관리자: 배부 -->
+    <section class="section" id="admin-distribute">
+      <div class="section-header">
+        <div class="section-number admin">A2</div>
+        <div class="section-title">배부 처리</div>
+      </div>
+      <p class="section-desc">승인된 신청에 대해 실제 배부 일자와 방법을 기록합니다.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">승인된 신청 열기</div>
+            <div class="step-desc">신청 관리 탭에서 <strong>승인완료</strong> 상태 건의 상세를 엽니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">배부 날짜·방법 입력</div>
+            <div class="step-desc">팝업 하단의 <strong>배부 날짜</strong>와 <strong>배부 방법</strong>(예: 직접전달, 택배)을 입력합니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">📦 배부 처리</div>
+            <div class="step-desc">항목별로 <strong>📦 배부</strong> 버튼을 클릭하거나, <strong>📦 전체 배부완료</strong>로 한 번에 처리합니다. 신청자에게 배부완료 이메일이 자동 발송됩니다.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 관리자: 취소 처리 -->
+    <section class="section" id="admin-cancel">
+      <div class="section-header">
+        <div class="section-number admin">A3</div>
+        <div class="section-title">취소 처리</div>
+      </div>
+      <p class="section-desc">직접 취소하거나 유저의 취소신청을 확정/거절합니다. 취소 시 재고 자동 복구됩니다.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>상황</th><th>버튼</th><th>결과</th></tr></thead>
+          <tbody>
+            <tr><td>관리자가 직접 항목 취소</td><td>✕ 취소</td><td>즉시 취소, 재고 복구</td></tr>
+            <tr><td>관리자가 신청 전체 취소</td><td>🚫 전체취소</td><td>전체 취소, 재고 복구</td></tr>
+            <tr><td>유저 취소신청 확정</td><td>✓ 취소확정</td><td>항목 취소, 재고 복구</td></tr>
+            <tr><td>유저 취소신청 거절</td><td>✕ 거절</td><td>취소신청 취소, 상태 유지</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 관리자: 재고 -->
+    <section class="section" id="admin-stock">
+      <div class="section-header">
+        <div class="section-number admin">A4</div>
+        <div class="section-title">재고 관리</div>
+      </div>
+      <p class="section-desc">관리자 탭 → <strong>재고 관리</strong>에서 현재 재고를 확인하고 수정합니다.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">재고 직접 수정</div>
+            <div class="step-desc">각 제품의 수량 입력란에 숫자를 입력하고 <strong>수정</strong> 버튼을 클릭합니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">재고 재계산 (syncStock)</div>
+            <div class="step-desc">구글 시트에서 행을 직접 삭제하거나 데이터 불일치 발생 시, Apps Script에서 <strong>syncStock</strong> 함수를 실행하면 전체 재고가 활성 신청 기준으로 재계산됩니다.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 관리자: 리포트 -->
+    <section class="section" id="admin-report">
+      <div class="section-header">
+        <div class="section-number admin">A5</div>
+        <div class="section-title">배부현황 리포트</div>
+      </div>
+      <p class="section-desc">Apps Script의 <strong>generateReport</strong> 함수를 실행하면 구글 시트에 "배부현황" 탭이 생성됩니다.</p>
+      <div class="info-box blue">
+        📊 리포트 구조: <strong>제품명(행) × 신청팀/담당자(열)</strong> 피벗 표. 총재고 · 팀별 배부수량 · 배부합계 · 잔여재고 표시. 재고가 0이면 빨간색으로 강조.
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Apps Script 편집기 열기</div>
+            <div class="step-desc">구글 시트에서 상단 메뉴 → 확장 프로그램 → Apps Script를 클릭합니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">generateReport 선택 후 실행</div>
+            <div class="step-desc">상단 함수 드롭다운에서 <strong>generateReport</strong>를 선택하고 ▶️ 실행 버튼을 클릭합니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">구글 시트 "배부현황" 탭 확인</div>
+            <div class="step-desc">실행 완료 후 구글 시트로 돌아가 "배부현황" 탭을 확인합니다. 이 탭에서 피벗 테이블을 추가로 만들 수 있습니다.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 상태 안내 -->
+    <section class="section" id="status">
+      <div class="section-header">
+        <div class="section-number">📌</div>
+        <div class="section-title">신청 상태 한눈에 보기</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>상태</th><th>설명</th><th>유저 가능 행동</th><th>관리자 가능 행동</th></tr></thead>
+          <tbody>
+            <tr><td>⏳ 대기중</td><td>신청 접수, 관리자 검토 전</td><td>항목 취소</td><td>항목/전체 승인, 반려, 전체취소</td></tr>
+            <tr><td>✅ 승인완료</td><td>관리자 승인, 배부 대기</td><td>항목 취소신청</td><td>항목/전체 배부, 취소확정/거절</td></tr>
+            <tr><td>📦 배부완료</td><td>실물 배부 완료</td><td>결과보고서 등록</td><td>—</td></tr>
+            <tr><td>❌ 반려</td><td>관리자 반려 처리</td><td>재신청 가능</td><td>—</td></tr>
+            <tr><td>✕ 취소</td><td>취소 완료</td><td>—</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- FAQ -->
+    <section class="section" id="faq">
+      <div class="section-header">
+        <div class="section-number">❓</div>
+        <div class="section-title">자주 묻는 질문</div>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num" style="font-size:16px">Q</div>
+          <div class="step-body">
+            <div class="step-title">원하는 제품이 목록에 없어요.</div>
+            <div class="step-desc">재고가 0인 제품은 일반 직원 화면에서 표시되지 않습니다. 관리자에게 재고 추가를 요청하세요.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num" style="font-size:16px">Q</div>
+          <div class="step-body">
+            <div class="step-title">연락처에 하이픈(-)을 꼭 넣어야 하나요?</div>
+            <div class="step-desc">아니요. 숫자만 입력해도 자동으로 000-0000-0000 형식으로 변환됩니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num" style="font-size:16px">Q</div>
+          <div class="step-body">
+            <div class="step-title">승인 이메일을 못 받았어요.</div>
+            <div class="step-desc">회원가입 시 입력한 이메일 주소를 확인해주세요. 스팸함을 확인하거나, 관리자에게 이메일 재전송을 요청할 수 있습니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num" style="font-size:16px">Q</div>
+          <div class="step-body">
+            <div class="step-title">비밀번호를 잊어버렸어요.</div>
+            <div class="step-desc">비밀번호는 암호화 저장으로 복구가 불가합니다. 관리자에게 계정 재생성을 요청하세요.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num" style="font-size:16px">Q</div>
+          <div class="step-body">
+            <div class="step-title">결과보고서는 어디에 저장되나요?</div>
+            <div class="step-desc">관리자 구글 드라이브에 자동 저장됩니다. 신청 상세 페이지의 관리자 메모 칸에서 링크를 확인할 수 있습니다.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div style="text-align:center;padding:32px 0 16px;font-size:12px;color:var(--muted)">
+      🐾 카카오프렌즈 GIK배분시스템 · 월드비전 자선기금팀 · 내부 전용 문서
+    </div>
+
+  </main>
+</div>
+
+<script>
+// URL에 ?admin=1 이 없으면 관리자 전용 섹션(TOC/배너/구분선/A1~A5 본문)을 숨긴다.
+// 일반 직원용 "사용설명서" 버튼은 파라미터 없이 링크하고, 관리자 전용 링크만 ?admin=1을 붙인다.
+(function () {
+  var isAdmin = new URLSearchParams(location.search).get('admin') === '1';
+  if (isAdmin) return;
+  var toc = document.getElementById('admin-toc-group');
+  if (toc) toc.style.display = 'none';
+  var divider = document.getElementById('admin-section-divider');
+  if (divider) divider.style.display = 'none';
+  document.querySelectorAll('.admin-banner').forEach(function (el) { el.style.display = 'none'; });
+  document.querySelectorAll('section[id^="admin-"]').forEach(function (el) { el.style.display = 'none'; });
+})();
+</script>

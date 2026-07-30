@@ -202,7 +202,7 @@ tr:hover td{background:#FFFBF0}
   <button onclick="showPage('admin')" id="btn-admin" style="display:none">관리자</button>
   <button onclick="toggleCart()" id="btn-cart">📋 장바구니 <span class="badge" id="cart-badge" style="display:none">0</span></button>
   <button onclick="showPage('feedback')" id="btn-feedback">💬 피드백</button>
-  <button onclick="window.open('https://drive.google.com/file/d/1Cm2fov5qAYkEyouRUQ0BPmNpp_zpDVb7/view?usp=sharing','_blank')" title="사용설명서 PDF 보기" style="font-size:13px">📖 사용설명서</button>
+  <button onclick="openManual()" title="사용설명서 보기" style="font-size:13px">📖 사용설명서</button>
   <button onclick="doLogout()" style="font-size:12px">로그아웃</button>
 </nav>
 
@@ -685,6 +685,12 @@ function notifyPendingReportsIfAny() {
   if (needed.length > 0) {
     alert(`📎 결과보고가 필요합니다\n\n등록하지 않은 결과보고가 ${needed.length}건 있습니다.\n"내 역" 메뉴에서 확인 후 등록해주세요.`);
   }
+}
+// 관리자로 로그인한 경우 사용설명서의 관리자 전용 섹션(A1~A5)까지 함께 보이도록 ?admin=1을 붙인다.
+// 구글 드라이브가 회사 네트워크에서 막혀있는 경우가 있어 같은 저장소(GitHub Pages)에서 서빙한다.
+function openManual() {
+  const isAdmin = currentUser?.role === 'admin';
+  window.open('카카오프렌즈_GIK배분시스템_사용설명서.html' + (isAdmin ? '?admin=1' : ''), '_blank');
 }
 function doLogout() {
   currentUser=null; sessionStorage.removeItem('currentUser'); cart={};
