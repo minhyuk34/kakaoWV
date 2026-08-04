@@ -683,7 +683,7 @@ async function enterSystem(user) {
 // 로그인한 본인 명의로 배부완료됐지만 아직 결과보고를 등록하지 않은 건이 있으면 안내
 function notifyPendingReportsIfAny() {
   const needed = getRequests().filter(r =>
-    r.name === currentUser?.name && r.status === 'distributed' && !hasReportSubmitted(r)
+    normName(r.name) === normName(currentUser?.name) && r.status === 'distributed' && !hasReportSubmitted(r)
   );
   if (needed.length > 0) {
     alert(`📎 결과보고가 필요합니다\n\n등록하지 않은 결과보고가 ${needed.length}건 있습니다.\n"내 역" 메뉴에서 확인 후 등록해주세요.`);
@@ -932,7 +932,7 @@ async function submitRequest() {
   // 같은 신청인이 수취예정일·사용예정일이 모두 같은 활성 신청을 이미 갖고 있으면 병합 여부를 확인
   const existing = getRequests().find(r =>
     (r.status === 'pending' || r.status === 'approved') &&
-    r.name === name &&
+    normName(r.name) === normName(name) &&
     dateOnly(r.pickupDate) === pickupDate &&
     dateOnly(r.useDate) === useDate
   );
@@ -984,13 +984,16 @@ async function submitRequest() {
 }
 
 // ── 내 신청 ──
+// 앞뒤/중복 공백 같은 눈에 안 보이는 차이 때문에 내 신청이 통째로 안 보이는 걸 막기 위한
+// 이름 비교(백엔드 getRequests의 정규화 로직과 동일).
+function normName(s) { return String(s || '').trim().replace(/\s+/g, ' '); }
 function updateMyReqBadge() {
-  const cnt=getRequests().filter(r=>r.name===currentUser?.name && r.status==='pending').length;
+  const cnt=getRequests().filter(r=>normName(r.name)===normName(currentUser?.name) && r.status==='pending').length;
   const b=document.getElementById('myreq-badge');
   b.style.display=cnt>0?'':'none'; b.textContent=cnt;
 }
 function renderMyRequests() {
-  const reqs=getRequests().filter(r=>r.name===currentUser.name);
+  const reqs=getRequests().filter(r=>normName(r.name)===normName(currentUser.name));
   const el=document.getElementById('myreq-content');
   if (reqs.length===0){el.innerHTML='<div class="empty"><div class="emoji">📋</div><p>주문 내역이 없습니다</p></div>';return;}
   el.innerHTML=reqs.map(r=>`
@@ -1996,7 +1999,7 @@ function csvEscape(val) {
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
 }
 function downloadMyReqExcel() {
-  const reqs = getRequests().filter(r => r.name === currentUser.name);
+  const reqs = getRequests().filter(r => normName(r.name) === normName(currentUser.name));
   if (reqs.length === 0) { toast('다운로드할 주문내역이 없습니다'); return; }
 
   const headers = ['신청일시','상태','본부','팀','이름','연락처','사용처','수취예정일','사용예정일','제품명','신청수량','실배부수량','배부처','배부수량','남은개수'];

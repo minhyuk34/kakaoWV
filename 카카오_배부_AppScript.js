@@ -1276,7 +1276,11 @@ function getRequests({ name, role }) {
     });
   });
 
-  const filtered = reqs.filter(r => role === 'admin' || r.name === name);
+  // 이름이 완전히 똑같아야만 매칭되면 앞뒤 공백/중복 공백 같은 눈에 안 보이는 차이만
+  // 있어도 본인 신청 건이 "내 신청"에서 통째로 안 보이게 된다(관리자 화면에선 전체를
+  // 보여주므로 정상으로 보이고, 정작 본인만 못 찾는 상황). 공백을 정규화해서 비교한다.
+  const norm = s => String(s || '').trim().replace(/\s+/g, ' ');
+  const filtered = reqs.filter(r => role === 'admin' || norm(r.name) === norm(name));
   return { ok: true, requests: filtered };
 }
 
