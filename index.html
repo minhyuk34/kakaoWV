@@ -47,17 +47,18 @@ nav .user-info{font-size:13px;color:var(--kakao);font-weight:600}
 .stock-info.low{color:var(--red);font-weight:600}
 /* 창고지도 */
 .wh-col-headers{display:grid;grid-template-columns:60px 1fr 26px 1fr 26px 1fr 26px 1fr;gap:6px;margin-bottom:6px}
-.wh-col-headers .wh-col-head{text-align:center;font-size:12px;font-weight:700;color:var(--muted)}
-.wh-grid{display:grid;grid-template-columns:60px 1fr 26px 1fr 26px 1fr 26px 1fr;gap:6px;background:var(--card);border:1.5px solid var(--border);border-radius:12px;padding:14px}
-.wh-row-label{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--muted);writing-mode:vertical-rl}
-.wh-zone{background:var(--kakao);border:2px solid var(--brown);border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;transition:transform .15s,box-shadow .15s;min-height:64px;display:flex;flex-direction:column;justify-content:center;gap:2px}
-.wh-zone:hover{transform:translateY(-2px);box-shadow:0 4px 10px rgba(0,0,0,.12)}
-.wh-zone-code{font-size:12px;font-weight:800;color:var(--brown)}
-.wh-zone-count{font-size:14px;font-weight:800;color:var(--brown)}
-.wh-zone-species{font-size:10px;color:var(--brown);opacity:.75}
-.wh-zone-highlight{background:#FFF3CD;border-color:#E0A800;box-shadow:0 0 0 3px rgba(224,168,0,.35)}
-.wh-pillar{display:flex;align-items:center;justify-content:center;background:repeating-linear-gradient(45deg,#ddd,#ddd 4px,#eee 4px,#eee 8px);border-radius:4px;font-size:9px;color:#888;writing-mode:vertical-rl}
-.wh-door-row{text-align:center;font-size:12px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1.5px dashed var(--border)}
+.wh-col-headers .wh-col-head{text-align:center;font-size:13px;font-weight:800;color:var(--brown)}
+.wh-grid{display:grid;grid-template-columns:60px 1fr 26px 1fr 26px 1fr 26px 1fr;gap:8px;background:var(--card);border:1.5px solid var(--border);border-radius:12px;padding:14px}
+.wh-row-label{display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:var(--brown);writing-mode:vertical-rl}
+.wh-zone{background:linear-gradient(155deg,#FFE812 0%,var(--kakao) 55%,#FFD400 100%);border:3px solid var(--brown);border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;transition:transform .15s,box-shadow .15s;min-height:64px;display:flex;flex-direction:column;justify-content:center;gap:2px;box-shadow:0 2px 0 rgba(60,30,30,.25),0 3px 8px rgba(0,0,0,.1)}
+.wh-zone:hover{transform:translateY(-3px);box-shadow:0 5px 0 rgba(60,30,30,.25),0 8px 16px rgba(0,0,0,.18)}
+.wh-zone-code{font-size:13px;font-weight:900;color:var(--brown)}
+.wh-zone-count{font-size:16px;font-weight:900;color:var(--brown)}
+.wh-zone-species{font-size:10px;color:var(--brown);opacity:.8;font-weight:600}
+.wh-zone-highlight{background:linear-gradient(155deg,#FF8A3D 0%,#FF6B1A 55%,#FF9A4D 100%);border-color:#B8390C;box-shadow:0 0 0 4px rgba(255,107,26,.4),0 4px 12px rgba(255,107,26,.5)}
+.wh-zone-highlight .wh-zone-code,.wh-zone-highlight .wh-zone-count,.wh-zone-highlight .wh-zone-species{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.25)}
+.wh-pillar{display:flex;align-items:center;justify-content:center;background:repeating-linear-gradient(45deg,#8a8a8a,#8a8a8a 4px,#b0b0b0 4px,#b0b0b0 8px);border-radius:4px;font-size:9px;color:#fff;font-weight:700;writing-mode:vertical-rl;text-shadow:0 1px 1px rgba(0,0,0,.3)}
+.wh-door-row{text-align:center;font-size:12px;font-weight:700;color:var(--brown);margin-top:8px;padding-top:8px;border-top:2px dashed var(--kakao)}
 @media (max-width:640px){
   .wh-col-headers,.wh-grid{grid-template-columns:40px 1fr 18px 1fr 18px 1fr 18px 1fr}
   .wh-zone-code,.wh-zone-count{font-size:11px}
@@ -1431,12 +1432,12 @@ async function refreshReportSheet() {
   }
   if (btn) { btn.disabled=false; btn.textContent='📊 배부현황 시트 새로고침'; }
 }
-function renderAdminInventory() {
-  const el=document.getElementById('admin-inventory');
-
-  // 제품별로 "신청만 되고 아직 배부 안 된 수량"과 "배부완료된 수량"을 나눠서 집계
-  const requestedMap = {};   // 신청됐지만 미배부
-  const distributedMap = {}; // 배부완료(반품 반영된 실배부수량 기준)
+// 제품별로 "신청만 되고 아직 배부 안 된 수량"과 "배부완료된 수량"을 나눠서 집계.
+// 재고관리 표와 창고지도가 공통으로 쓴다 — 창고지도는 신청재고(아직 현장에 있음)는
+// 빼면 안 되고 배부재고(실제로 나간 것)만 빼야 하므로 이 구분이 꼭 필요하다.
+function computeReqDistMaps() {
+  const requestedMap = {};   // 신청됐지만 미배부(아직 현장에 있음)
+  const distributedMap = {}; // 배부완료(반품 반영된 실배부수량 기준, 현장에서 나간 것)
   getRequests().forEach(r => {
     if (r.status === 'cancelled' || r.status === 'rejected') return;
     (r.items || []).forEach(item => {
@@ -1449,6 +1450,11 @@ function renderAdminInventory() {
       }
     });
   });
+  return { requestedMap, distributedMap };
+}
+function renderAdminInventory() {
+  const el=document.getElementById('admin-inventory');
+  const { requestedMap, distributedMap } = computeReqDistMaps();
 
   let totalOriginal=0, totalRequested=0, totalDistributed=0, totalCurrent=0;
   const rows = PRODUCTS.map(p=>{
@@ -2088,19 +2094,28 @@ function downloadMyReqExcel() {
 // WAREHOUSE_LAYOUT.rows[r].cells[ci] → grid-column = 2 + ci*2
 let whHighlightZones = null; // 강조할 구역 Set, 없으면 null
 
-function whZoneItems(zone) {
+// 창고지도는 "지금 현장(창고)에 실제로 몇 개가 있는지"를 보여줘야 한다.
+// getStock()(=현재재고)은 신청만 되고 아직 안 나간 물량까지 미리 빼놓은 값이라
+// (재고는 신청 시점에 차감됨) 여기엔 안 맞는다 — 신청됐지만 미배부인 건 아직
+// 현장에 그대로 있으니, 실제로 나간(배부완료된) 수량만 원래재고에서 빼야 한다.
+function whZoneItems(zone, distributedMap) {
+  distributedMap = distributedMap || computeReqDistMaps().distributedMap;
   return PRODUCTS
     .filter(p => PRODUCT_ZONE[p.num] === zone)
-    .map(p => ({ num: p.num, name: p.name, qty: getStock(p.num) }))
+    .map(p => ({
+      num: p.num, name: p.name,
+      qty: Math.max(0, getOriginalStock(p.num) - (distributedMap[p.num] || 0))
+    }))
     .sort((a,b) => a.name.localeCompare(b.name, 'ko'));
 }
-function whZoneTotal(zone) {
-  return whZoneItems(zone).reduce((s,i) => s + (Number(i.qty) || 0), 0);
+function whZoneTotal(zone, distributedMap) {
+  return whZoneItems(zone, distributedMap).reduce((s,i) => s + (Number(i.qty) || 0), 0);
 }
 function renderWarehouseMap() {
   const el = document.getElementById('warehouse-map');
   if (!el) return;
 
+  const { distributedMap } = computeReqDistMaps();
   const rowCount = WAREHOUSE_LAYOUT.rows.length;
   const cellNodes = [];
 
@@ -2112,7 +2127,7 @@ function renderWarehouseMap() {
         cellNodes.push(`<div style="grid-column:${col};grid-row:${ri+1}"></div>`);
         return;
       }
-      const items = whZoneItems(zone);
+      const items = whZoneItems(zone, distributedMap);
       const total = items.reduce((s,i) => s + (Number(i.qty) || 0), 0);
       const highlighted = whHighlightZones && whHighlightZones.has(zone);
       cellNodes.push(`<div class="wh-zone${highlighted?' wh-zone-highlight':''}" style="grid-column:${col};grid-row:${ri+1}" onclick="showZoneDetail('${zone}')">
