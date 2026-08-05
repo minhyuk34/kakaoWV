@@ -409,6 +409,7 @@
       <a class="toc-link" href="#myreq">주문내역 확인</a>
       <a class="toc-link" href="#cancel">취소 신청</a>
       <a class="toc-link" href="#feedback">피드백 남기기</a>
+      <a class="toc-link" href="#warehouse">창고지도로 물품 찾기</a>
     </div>
 
     <div class="toc-group" id="admin-toc-group">
@@ -736,6 +737,36 @@
             <div class="step-desc">자유롭게 의견을 작성하고 <strong>피드백 제출</strong>을 클릭합니다. 내용은 구글 시트 "피드백" 탭에 저장되며 관리자가 확인합니다.</div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- 8. 창고지도 -->
+    <section class="section" id="warehouse">
+      <div class="section-header">
+        <div class="section-number">8</div>
+        <div class="section-title">창고지도로 물품 위치 찾기</div>
+      </div>
+      <p class="section-desc">상단 <strong>🗺️ 창고지도</strong> 탭에서 실제 창고 평면도를 보고, 제품이 어느 구역에 있는지·현재 몇 개가 창고에 남아있는지 확인할 수 있습니다.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">구역 클릭해서 재고 확인</div>
+            <div class="step-desc">지도의 각 구역(예: A_가, B_나 등)을 클릭하면 그 구역에 있는 제품 목록과 현재 창고 재고 수량이 팝업으로 뜹니다.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">📍 내 신청 물품 찾기</div>
+            <div class="step-desc">이 버튼을 누르면 내가 신청했지만 아직 배부받지 않은 물품이 있는 구역이 지도에서 주황색으로 강조되고, 어떤 물품이 어느 구역에 있는지 목록으로도 보여줍니다.</div>
+          </div>
+        </div>
+      </div>
+      <div class="info-box blue">
+        💡 구역에 표시되는 수량은 <strong>창고에 실제로 남아있는 개수</strong>입니다. 누군가 신청만 하고 아직 배부받지 않은 물량은 아직 창고에 있는 것으로 계산되고, 실제로 배부완료(수령)된 만큼만 빠집니다.
       </div>
     </section>
 

@@ -2028,11 +2028,14 @@ function closeImgViewer(e) {
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeImgViewer(); });
 // ── 수동/자동 새로고침 ──
-async function refreshAdmin() {
+async function refreshAdmin(auto) {
   const btn = document.getElementById('admin-refresh-btn');
-  if (btn) { btn.disabled=true; btn.textContent='⏳ 갱신 중...'; }
-  // 구글시트 행 삭제 등 수동 수정 시 재고 재계산
-  try { await api('syncStock'); } catch(e) {}
+  if (btn && !auto) { btn.disabled=true; btn.textContent='⏳ 갱신 중...'; }
+  // 구글시트 행 삭제 등 수동 수정 시 재고 재계산 — 전체 신청 시트를 다시 훑는 무거운 작업이라
+  // 30초 자동 새로고침 때마다 매번 돌리면 신청 건수가 늘어날수록 계속 느려진다.
+  // 재고는 이미 각 처리 시점에 실시간으로 반영되므로, 자동 새로고침에서는 생략하고
+  // 사람이 직접 "새로고침"을 눌렀을 때만 재계산한다.
+  if (!auto) { try { await api('syncStock'); } catch(e) {} }
   await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
   renderAdmin();
   updateStats();
@@ -2223,15 +2226,18 @@ function clearWarehouseHighlight() {
   renderWarehouseMap();
 }
 
-// 관리자 페이지 자동 갱신 (30초)
+// 관리자 페이지 자동 갱신 (45초, 브라우저 탭이 보일 때만)
+// 신청 건수가 쌓일수록 매번의 갱신 비용도 커지므로, 안 보고 있을 땐 아예 돌리지 않고
+// 무거운 재고 재계산(syncStock)도 자동 갱신에서는 생략한다(refreshAdmin(true) 참고).
 let _autoRefreshTimer = null;
 function startAutoRefresh() {
   if (_autoRefreshTimer) clearInterval(_autoRefreshTimer);
   _autoRefreshTimer = setInterval(() => {
+    if (document.hidden) return; // 다른 탭/창에 가있는 동안은 건너뜀
     if (currentUser?.role === 'admin' && document.getElementById('page-admin')?.classList.contains('active')) {
-      refreshAdmin();
+      refreshAdmin(true);
     }
-  }, 30000);
+  }, 45000);
 }
 
 
