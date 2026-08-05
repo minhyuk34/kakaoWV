@@ -653,6 +653,15 @@ async function loadRequestsFromAPI() {
   } catch(e) { console.warn('신청 API 실패'); }
 }
 function getRequests() { return reqCache; }
+// 서버에 저장된 창고 위치(제품번호→구역)를 불러와서 기본 PRODUCT_ZONE 위에 덮어쓴다.
+// 관리자가 창고지도에서 위치를 옮기거나 새로 지정하면 여기로 저장되므로, 항상 이 값이
+// 엑셀에서 가져온 초기 배치보다 우선한다.
+async function loadProductZonesFromAPI() {
+  try {
+    const res = await api('getProductZones');
+    if (res.ok && res.zones) Object.assign(PRODUCT_ZONE, res.zones);
+  } catch(e) { console.warn('창고구역 API 실패, 기본 데이터 사용'); }
+}
 
 // ── AUTH ──
 async function sha256(str) {
@@ -765,9 +774,9 @@ function showPage(id) {
   document.getElementById('btn-'+id)?.classList.add('active');
   if (id==='catalog') renderCatalog();
   if (id==='myreq') loadRequestsFromAPI().then(()=>renderMyRequests());
-  if (id==='admin') Promise.all([loadStockFromAPI(),loadRequestsFromAPI()]).then(()=>renderAdmin());
+  if (id==='admin') Promise.all([loadStockFromAPI(),loadRequestsFromAPI(),loadProductZonesFromAPI()]).then(()=>renderAdmin());
   if (id==='feedback') loadFeedback();
-  if (id==='warehouse') Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]).then(()=>renderWarehouseMap());
+  if (id==='warehouse') Promise.all([loadStockFromAPI(), loadRequestsFromAPI(), loadProductZonesFromAPI()]).then(()=>renderWarehouseMap());
 }
 
 // ── CART ──
@@ -1359,6 +1368,27 @@ async function saveReqSchedule(id) {
   } catch(e) { toast('❌ 서버 오류: '+e.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '💾 날짜 저장'; } }
 }
+// 인쇄용 피킹리스트에 넣을 창고지도 — 화면의 창고지도와 같은 배치를 별도 창(document)에
+// 그대로 그려서 넣는다. highlightZones에 담긴 구역만 진하게 표시해서 찾기 쉽게 한다.
+function buildWarehouseMapPrintHtml(highlightZones) {
+  const cell = (zone) => {
+    if (!zone) return `<div></div>`;
+    const hl = highlightZones && highlightZones.has(zone);
+    return `<div style="border:2px solid #3C1E1E;border-radius:8px;padding:10px 4px;text-align:center;background:${hl?'#FF6B1A':'#FFF3CD'};color:${hl?'#fff':'#3C1E1E'};font-weight:800;font-size:13px">${zone}</div>`;
+  };
+  const pillar = `<div style="display:flex;align-items:center;justify-content:center;font-size:9px;color:#999;background:repeating-linear-gradient(45deg,#ddd,#ddd 3px,#eee 3px,#eee 6px);border-radius:4px">기둥</div>`;
+  const colTemplate = '36px 1fr 20px 1fr 20px 1fr 20px 1fr';
+  const headerRow = `<div style="display:grid;grid-template-columns:${colTemplate};gap:4px;margin-bottom:4px">
+    <div></div>${WAREHOUSE_LAYOUT.columns.map((c,ci)=>`<div style="grid-column:${2+ci*2};text-align:center;font-size:11px;font-weight:700">${c}열</div>`).join('')}
+  </div>`;
+  const rowsHtml = WAREHOUSE_LAYOUT.rows.map(row => {
+    const cells = row.cells.map((zone, ci) => cell(zone) + (ci < row.cells.length-1 ? pillar : '')).join('');
+    return `<div style="display:grid;grid-template-columns:${colTemplate};gap:4px;align-items:stretch;margin-bottom:4px">
+      <div style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${row.label}</div>${cells}
+    </div>`;
+  }).join('');
+  return `${headerRow}${rowsHtml}<div style="text-align:center;font-size:11px;color:#777;margin-top:6px">🚪 창고 문(입구)</div>`;
+}
 function generatePickList() {
   const reqs = getRequests().filter(r => selectedReqIds.has(String(r.id)));
   if (reqs.length === 0) { toast('❌ 선택된 신청이 없습니다'); return; }
@@ -1370,14 +1400,17 @@ function generatePickList() {
       agg[key] = (agg[key] || 0) + i.qty;
     });
   });
+  // 위치(구역) 기준으로 묶어서 정렬 — 같은 구역 물건을 한 번에 챙길 수 있게
+  const byZoneThenNum = (a,b) => (a.zone||'미지정').localeCompare(b.zone||'미지정') || a.num.localeCompare(b.num);
   const totalRows = Object.entries(agg)
-    .map(([key, qty]) => { const [num, name] = key.split('|'); return { num, name, qty }; })
-    .sort((a,b) => a.num.localeCompare(b.num));
+    .map(([key, qty]) => { const [num, name] = key.split('|'); return { num, name, qty, zone: PRODUCT_ZONE[num] || '' }; })
+    .sort(byZoneThenNum);
+  const highlightZones = new Set(totalRows.map(r => r.zone).filter(Boolean));
 
   const personSections = reqs.map(r => {
     const items = r.items.filter(i => !i.cancelled)
-      .map(i => ({ num: String(i.num).padStart(3,'0'), name: i.name, qty: i.qty }))
-      .sort((a,b) => a.num.localeCompare(b.num));
+      .map(i => ({ num: String(i.num).padStart(3,'0'), name: i.name, qty: i.qty, zone: PRODUCT_ZONE[String(i.num).padStart(3,'0')] || '' }))
+      .sort(byZoneThenNum);
     const qtySum = items.reduce((s,i)=>s+i.qty, 0);
     return `
     <div class="person-block">
@@ -1386,8 +1419,8 @@ function generatePickList() {
         <span class="muted"> · 연락처 ${r.contact||'-'}</span>
         <span class="muted"> · ${items.length}종 ${qtySum.toLocaleString()}개</span>
       </div>
-      <table><thead><tr><th style="width:70px">번호</th><th>제품명</th><th style="width:90px;text-align:right">수량</th></tr></thead>
-      <tbody>${items.map(i=>`<tr><td>${i.num}</td><td>${i.name}</td><td class="qty">${i.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
+      <table><thead><tr><th style="width:70px">번호</th><th>제품명</th><th style="width:70px">위치</th><th style="width:90px;text-align:right">수량</th></tr></thead>
+      <tbody>${items.map(i=>`<tr><td>${i.num}</td><td>${i.name}</td><td class="zone">${i.zone||'-'}</td><td class="qty">${i.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
     </div>`;
   }).join('');
 
@@ -1404,18 +1437,22 @@ function generatePickList() {
       th,td{border:1px solid #ccc;padding:9px 12px;font-size:14px;text-align:left}
       th{background:#3C1E1E;color:#FEE500}
       td.qty{text-align:right;font-weight:700}
+      td.zone{font-weight:700;color:#B8390C}
       .person-block{margin-bottom:22px;page-break-inside:avoid}
       .person-head{margin-bottom:8px;font-size:14px}
+      .map-wrap{margin-top:14px;padding:16px;border:1.5px solid #ccc;border-radius:12px;page-break-inside:avoid}
       .print-btn{margin-top:24px;padding:10px 22px;background:#FEE500;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer}
       @page { size: A4; margin: 16mm 14mm; }
       @media print { .print-btn{display:none} }
     </style></head><body>
     <h1>📦 창고 피킹리스트</h1>
     <div class="sub">출력일: ${today} · 선택 신청 ${reqs.length}건 · 총 ${totalRows.length}종 ${totalRows.reduce((s,r)=>s+r.qty,0).toLocaleString()}개</div>
-    <table><thead><tr><th style="width:70px">번호</th><th>제품명</th><th style="width:90px;text-align:right">수량</th></tr></thead>
-    <tbody>${totalRows.map(r=>`<tr><td>${r.num}</td><td>${r.name}</td><td class="qty">${r.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
+    <table><thead><tr><th style="width:70px">번호</th><th>제품명</th><th style="width:70px">위치</th><th style="width:90px;text-align:right">수량</th></tr></thead>
+    <tbody>${totalRows.map(r=>`<tr><td>${r.num}</td><td>${r.name}</td><td class="zone">${r.zone||'-'}</td><td class="qty">${r.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
     <h2>👤 신청인별 내역</h2>
     ${personSections}
+    <h2>🗺️ 창고 지도 (주황색 구역에서 찾으세요)</h2>
+    <div class="map-wrap">${buildWarehouseMapPrintHtml(highlightZones)}</div>
     <button class="print-btn" onclick="window.print()">🖨️ 인쇄</button>
     </body></html>`);
   win.document.close();
@@ -2158,23 +2195,32 @@ function renderWarehouseMap() {
   const unassigned = PRODUCTS.filter(p => !PRODUCT_ZONE[p.num]);
   const unassignedEl = document.getElementById('warehouse-unassigned');
   if (unassignedEl) {
+    const isAdmin = currentUser?.role === 'admin';
     unassignedEl.innerHTML = unassigned.length ? `
       <div style="margin-top:20px;padding:12px 14px;background:#FAFAFA;border-radius:10px">
         <div style="font-size:13px;font-weight:700;color:var(--muted);margin-bottom:6px">📌 아직 창고 위치가 지정되지 않은 제품 (${unassigned.length}종)</div>
-        <div style="font-size:12px;color:var(--muted)">${unassigned.map(p=>p.name).join(', ')}</div>
+        ${isAdmin ? `
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${unassigned.map(p=>`<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid var(--border);border-radius:14px;padding:3px 4px 3px 10px;font-size:12px">
+            ${p.name}
+            <button onclick="moveProductZone('${p.num}','${p.name.replace(/'/g,"\\'")}','')" style="font-size:11px;padding:2px 8px;border:none;border-radius:10px;background:var(--brown);color:var(--kakao);cursor:pointer">📍 지정</button>
+          </span>`).join('')}
+        </div>` : `<div style="font-size:12px;color:var(--muted)">${unassigned.map(p=>p.name).join(', ')}</div>`}
       </div>` : '';
   }
 }
 function showZoneDetail(zone) {
   const items = whZoneItems(zone);
   const total = items.reduce((s,i) => s + (Number(i.qty) || 0), 0);
+  const isAdmin = currentUser?.role === 'admin';
   document.getElementById('modal-title').textContent = `📦 구역 ${zone} 상세`;
   document.getElementById('modal-body').innerHTML = items.length ? `
     <table style="font-size:13px;width:100%">
-      <thead><tr><th>제품번호</th><th>제품명</th><th style="text-align:right">현재 재고</th></tr></thead>
+      <thead><tr><th>제품번호</th><th>제품명</th><th style="text-align:right">현재 재고</th>${isAdmin?'<th></th>':''}</tr></thead>
       <tbody>${items.map(i => `<tr>
         <td>${i.num}</td><td>${i.name}</td>
         <td style="text-align:right;font-weight:700">${(Number(i.qty)||0).toLocaleString()}개</td>
+        ${isAdmin?`<td style="text-align:right"><button onclick="moveProductZone('${i.num}','${i.name.replace(/'/g,"\\'")}','${zone}')" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;white-space:nowrap">📍 이동</button></td>`:''}
       </tr>`).join('')}</tbody>
     </table>
     <div style="text-align:right;margin-top:10px;font-weight:700">합계 ${total.toLocaleString()}개</div>
@@ -2183,6 +2229,27 @@ function showZoneDetail(zone) {
   document.getElementById('modal-confirm').onclick = closeModal;
   document.querySelector('.btn-cancel').style.display = 'none';
   document.getElementById('modal-overlay').classList.add('open');
+}
+// 관리자가 제품의 창고 위치를 옮기거나(기존 구역 있음) 새로 지정(구역 없음)할 때 사용
+function moveProductZone(num, name, currentZone) {
+  if (currentUser?.role !== 'admin') return;
+  const allZones = WAREHOUSE_LAYOUT.rows.flatMap(r => r.cells).filter(Boolean);
+  const input = prompt(`"${name}"의 새 구역을 입력하세요.\n\n사용 가능한 구역: ${allZones.join(', ')}`, currentZone || '');
+  if (input === null) return;
+  const newZone = input.trim();
+  if (!newZone) { toast('❌ 구역을 입력해주세요'); return; }
+  if (!allZones.includes(newZone)) { toast('❌ 존재하지 않는 구역입니다: ' + newZone); return; }
+  saveProductZone(num, newZone);
+}
+async function saveProductZone(num, newZone) {
+  try {
+    const res = await api('setProductZone', { num, zone: newZone, adminName: currentUser?.name || '' });
+    if (!res.ok) { toast('❌ 저장 실패: ' + res.error); return; }
+    PRODUCT_ZONE[num] = newZone;
+    toast(`✅ 구역이 ${newZone}(으)로 저장됐습니다`);
+    closeModal();
+    renderWarehouseMap();
+  } catch(e) { toast('❌ 서버 오류: ' + e.message); }
 }
 // 로그인한 유저 본인의 활성 신청(취소 제외) 항목들이 어느 구역에 있는지 지도에서 강조 표시
 function findMyItemsOnMap() {

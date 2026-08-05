@@ -7,6 +7,7 @@ const SHEET_ID   = 'YOUR_SPREADSHEET_ID'; // ← 스프레드시트 ID
 const SHEET_ACCT = '계정';
 const SHEET_REQ  = '신청';
 const SHEET_STK  = '재고';
+const SHEET_ZONE = '창고구역'; // 창고지도: 제품번호 → 구역(예: A_가) 매핑
 const ADMIN_EMAIL = 'minhyuk_jang@worldvision.or.kr';
 
 // ── 결과보고 샘플 파일 (base64, 메일 첨부용) ──
@@ -1083,6 +1084,8 @@ function doPost(e) {
     else if (action === 'updateRequestSchedule') result = updateRequestSchedule(data);
     else if (action === 'getStock')      result = getStock();
     else if (action === 'updateStock')   result = updateStock(data);
+    else if (action === 'getProductZones') result = getProductZones();
+    else if (action === 'setProductZone')  result = setProductZone(data);
     else if (action === 'syncStock')       result = syncStock();
     else if (action === 'approveItems')    result = approveItems(data);
     else if (action === 'updateItemQty')   result = updateItemQty(data);
@@ -1459,6 +1462,70 @@ function updateStock({ num, qty }) {
     }
   }
   return { ok: false, error: '제품을 찾을 수 없습니다.' };
+}
+
+// ── 창고지도: 제품 위치(구역) 조회/수정 ─────────────────────────
+function getProductZones() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const s = ss.getSheetByName(SHEET_ZONE);
+  if (!s) return { ok: true, zones: {} }; // 아직 시트가 없으면 빈 매핑(프런트 기본값 사용)
+  const rows = s.getDataRange().getValues().slice(1);
+  const zones = {};
+  rows.forEach(r => {
+    if (!r[0] || !r[1]) return;
+    zones[String(r[0]).padStart(3, '0')] = String(r[1]).trim();
+  });
+  return { ok: true, zones };
+}
+
+// 관리자가 창고지도에서 제품 위치를 옮기거나(이동) 새로 지정할(추가) 때 사용
+function setProductZone({ num, zone, adminName }) {
+  if (!num || !zone) return { ok: false, error: '제품번호와 구역을 모두 입력하세요.' };
+  const paddedNum = String(num).padStart(3, '0');
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let s = ss.getSheetByName(SHEET_ZONE);
+  if (!s) {
+    s = ss.insertSheet(SHEET_ZONE);
+    s.appendRow(['제품번호', '구역', '수정일시', '수정자']);
+    s.getRange(1, 1, 1, 4).setBackground('#3C1E1E').setFontColor('#FEE500').setFontWeight('bold');
+    s.setFrozenRows(1);
+  }
+  const rows = s.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).padStart(3, '0') === paddedNum) {
+      s.getRange(i + 1, 2).setValue(zone);
+      s.getRange(i + 1, 3).setValue(new Date().toLocaleString('ko-KR'));
+      s.getRange(i + 1, 4).setValue(adminName || '관리자');
+      return { ok: true };
+    }
+  }
+  s.appendRow([paddedNum, zone, new Date().toLocaleString('ko-KR'), adminName || '관리자']);
+  return { ok: true };
+}
+
+// 최초 1회만 실행: "카카오리스트.xlsx"의 상품별 구역 시트에서 뽑은 기존 위치 데이터를
+// 창고구역 시트에 심어준다. 이미 창고구역 시트에 있는 제품번호는 건드리지 않고
+// 없는 것만 추가한다(관리자가 그 사이 직접 옮긴 위치를 덮어쓰지 않기 위함).
+function initWarehouseZonesFromData() {
+  const ZONES = {"005": "A_다", "006": "A_다", "007": "A_다", "010": "B_나", "011": "A_다", "012": "A_나", "013": "B_나", "014": "A_다", "015": "A_나", "016": "B_나", "017": "A_나", "018": "A_다", "019": "A_다", "020": "A_나", "021": "B_나", "022": "D_나", "023": "A_나", "025": "A_다", "026": "A_나", "027": "A_나", "028": "A_나", "029": "A_다", "030": "B_나", "031": "A_나", "032": "B_나", "033": "A_가", "034": "B_가", "035": "B_나", "036": "A_다", "037": "A_다", "038": "B_나", "039": "B_나", "040": "A_가", "041": "A_다", "042": "A_나", "043": "A_다", "044": "B_나", "045": "A_나", "046": "B_가", "047": "B_가", "048": "B_가", "049": "A_가", "050": "A_가", "051": "B_나", "052": "B_나", "053": "B_가", "054": "B_가", "055": "A_나", "056": "D_나", "057": "A_다", "058": "B_가", "059": "A_다", "060": "A_다", "063": "A_다", "064": "B_나", "065": "B_나", "067": "B_가", "068": "B_나", "070": "A_다", "071": "A_다", "072": "B_가", "074": "B_나", "075": "A_다", "077": "B_나", "078": "A_다", "079": "B_가", "081": "B_나", "082": "D_가", "083": "D_나", "084": "D_나", "086": "C_나", "087": "D_나", "088": "D_나", "089": "D_나", "090": "D_나", "091": "C_나", "092": "C_나", "094": "C_나", "096": "D_나", "097": "D_나", "098": "D_가", "099": "D_가", "100": "B_가", "102": "A_가", "103": "D_나", "104": "A_가", "105": "B_가", "106": "A_가", "107": "C_나", "108": "B_가", "109": "B_가", "110": "A_가", "111": "B_가", "112": "D_나", "113": "A_가", "114": "D_나", "115": "B_가", "116": "A_가", "117": "B_가", "119": "B_나", "120": "C_가", "121": "C_나", "122": "D_나", "123": "C_나", "124": "B_나", "125": "D_가", "126": "B_나", "127": "B_나", "128": "C_가", "131": "B_나", "132": "B_나", "133": "B_나", "134": "B_나", "135": "B_나", "136": "B_나", "137": "C_가", "138": "B_나", "139": "B_나", "140": "D_나", "141": "B_나", "142": "B_나", "143": "B_나", "144": "B_나"};
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let s = ss.getSheetByName(SHEET_ZONE);
+  if (!s) {
+    s = ss.insertSheet(SHEET_ZONE);
+    s.appendRow(['제품번호', '구역', '수정일시', '수정자']);
+    s.getRange(1, 1, 1, 4).setBackground('#3C1E1E').setFontColor('#FEE500').setFontWeight('bold');
+    s.setFrozenRows(1);
+  }
+  const existing = new Set(s.getDataRange().getValues().slice(1).map(r => String(r[0]).padStart(3, '0')));
+  const now = new Date().toLocaleString('ko-KR');
+  const newRows = Object.entries(ZONES)
+    .filter(([num]) => !existing.has(num))
+    .map(([num, zone]) => [num, zone, now, '초기 데이터(엑셀)']);
+  if (newRows.length > 0) {
+    s.getRange(s.getLastRow() + 1, 1, newRows.length, 4).setValues(newRows);
+  }
+  Logger.log(`창고구역 초기화 완료: ${newRows.length}건 추가(이미 있던 ${existing.size}건은 유지)`);
+  try { SpreadsheetApp.getUi().alert(`창고구역 ${newRows.length}건을 새로 추가했습니다.`); } catch (e) {}
 }
 
 // ── 재고 재계산 (구글시트 행 삭제 후 동기화) ──────────────────
