@@ -1213,9 +1213,18 @@ function submitRequest_({ dept, team, name, contact, email, reason, pickupDate, 
 function getRequests({ name, role }) {
   const rows = sheet(SHEET_REQ).getDataRange().getValues().slice(1);
   const reqs = [];
+  const isAdmin = role === 'admin';
+  // 이름 비교 시 앞뒤/중복 공백을 무시(다른 곳과 동일 규칙)
+  const norm = s => String(s || '').trim().replace(/\s+/g, ' ');
+  const wantName = norm(name);
 
   rows.forEach(r => {
     if (!r[0]) return; // 빈 행 skip
+    // 관리자가 아니면 JSON 파싱 등 무거운 처리를 하기 전에 이름부터 먼저 걸러서
+    // 남의 신청 건은 아예 건드리지 않는다. 신청 건수가 쌓일수록 "내 신청" 하나 보려고
+    // 매번 전체 신청 데이터를 다 파싱하던 게 느려지는 주된 원인이라, 본인 것만 골라내는
+    // 이 한 줄이 체감 속도를 가장 크게 좌우한다.
+    if (!isAdmin && norm(r[4]) !== wantName) return;
 
     // 컬럼 자동 감지: 각 컬럼에서 JSON을 찾아서 위치 파악
     let itemsJson = '[]';
@@ -1279,12 +1288,7 @@ function getRequests({ name, role }) {
     });
   });
 
-  // 이름이 완전히 똑같아야만 매칭되면 앞뒤 공백/중복 공백 같은 눈에 안 보이는 차이만
-  // 있어도 본인 신청 건이 "내 신청"에서 통째로 안 보이게 된다(관리자 화면에선 전체를
-  // 보여주므로 정상으로 보이고, 정작 본인만 못 찾는 상황). 공백을 정규화해서 비교한다.
-  const norm = s => String(s || '').trim().replace(/\s+/g, ' ');
-  const filtered = reqs.filter(r => role === 'admin' || norm(r.name) === norm(name));
-  return { ok: true, requests: filtered };
+  return { ok: true, requests: reqs };
 }
 
 // ── 수취예정일 / 사용예정일 / 배부일 수정 ──
