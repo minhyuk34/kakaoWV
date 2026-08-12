@@ -1205,7 +1205,7 @@ function submitRequest_({ dept, team, name, contact, email, reason, pickupDate, 
   // 수취예정일/사용예정일 셀이 Date 타입으로 자동 변환되지 않도록 텍스트 서식 고정
   s.getRange(newRow, 9).setNumberFormat('@').setValue(formatDateOnly(pickupDate));
   s.getRange(newRow, 10).setNumberFormat('@').setValue(formatDateOnly(useDate));
-  items.forEach(item => deductStock(item.num, item.qty, { reqId: id, name, reason: '신청 제출' }));
+  deductStockBatch(items, { reqId: id, name, reason: '신청 제출' });
   return { ok: true, id };
 }
 
@@ -1595,18 +1595,22 @@ function restoreStock(num, qty, meta) { adjustStock(num, +qty, meta); }
 // ── 변경이력 기록 ────────────────────────────────────────────
 // 재고가 바뀌는 모든 지점(adjustStock/adjustStockAllowNegative)에서 공통으로 호출되어
 // "언제, 어떤 신청 때문에, 왜, 얼마나" 바뀌었는지 별도 시트에 남긴다.
+function ensureChangeLogSheet() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let s = ss.getSheetByName('변경이력');
+  if (!s) {
+    s = ss.insertSheet('변경이력');
+    s.appendRow(['일시', '제품번호', '신청ID', '신청인', '변경사유', '증감', '변경후재고']);
+    s.getRange(1, 1, 1, 7).setBackground('#3C1E1E').setFontColor('#FEE500').setFontWeight('bold');
+    s.setFrozenRows(1);
+    s.setColumnWidth(5, 220);
+  }
+  return s;
+}
 function logStockChange(meta, num, delta, afterQty) {
   if (!meta) return; // 사유가 없는 호출(예: 테스트)은 기록하지 않음
   try {
-    const ss = SpreadsheetApp.openById(SHEET_ID);
-    let s = ss.getSheetByName('변경이력');
-    if (!s) {
-      s = ss.insertSheet('변경이력');
-      s.appendRow(['일시', '제품번호', '신청ID', '신청인', '변경사유', '증감', '변경후재고']);
-      s.getRange(1, 1, 1, 7).setBackground('#3C1E1E').setFontColor('#FEE500').setFontWeight('bold');
-      s.setFrozenRows(1);
-      s.setColumnWidth(5, 220);
-    }
+    const s = ensureChangeLogSheet();
     s.appendRow([
       new Date().toLocaleString('ko-KR'),
       String(num).padStart(3, '0'),
@@ -1618,6 +1622,16 @@ function logStockChange(meta, num, delta, afterQty) {
     ]);
   } catch (e) {
     Logger.log('변경이력 기록 실패: ' + e.message);
+  }
+}
+// 여러 건을 한 번에 기록 — appendRow를 N번 부르는 대신 한 번의 setValues로 몰아서 쓴다.
+function logStockChangeBatch(rows) {
+  if (!rows || rows.length === 0) return;
+  try {
+    const s = ensureChangeLogSheet();
+    s.getRange(s.getLastRow() + 1, 1, rows.length, 7).setValues(rows);
+  } catch (e) {
+    Logger.log('변경이력 일괄 기록 실패: ' + e.message);
   }
 }
 
@@ -1640,6 +1654,44 @@ function adjustStock(num, delta, meta) {
       return;
     }
   }
+}
+
+// 신청 제출처럼 한 번에 여러 품목의 재고를 한꺼번에 줄여야 할 때 사용.
+// 품목 수만큼 재고 시트를 반복해서 읽고/쓰는 대신 딱 한 번만 읽고 한 번만 쓴다.
+// (신청은 LockService로 잠금을 건 채로 처리되는데, 품목마다 시트를 왕복하면 그만큼
+// 잠금을 오래 붙들고 있어서 동시에 여러 명이 쓸 때 서로 기다리는 시간이 길어진다)
+function deductStockBatch(items, meta) {
+  if (!items || items.length === 0) return;
+  const s = sheet(SHEET_STK);
+  const rows = s.getDataRange().getValues();
+  const rowIndexByNum = {};
+  for (let i = 1; i < rows.length; i++) {
+    if (!rows[i][0]) continue;
+    rowIndexByNum[String(rows[i][0]).padStart(3, '0')] = i;
+  }
+
+  const changeLogRows = [];
+  const now = new Date().toLocaleString('ko-KR');
+  items.forEach(item => {
+    const paddedNum = String(item.num).padStart(3, '0');
+    const rowIdx = rowIndexByNum[paddedNum];
+    if (rowIdx === undefined) return; // 재고 시트에 없는 제품번호는 건드리지 않음
+    const cur = Number(rows[rowIdx][2]) || 0;
+    const next = cur - Number(item.qty);
+    if (next < 0) {
+      Logger.log(`⚠️ 재고 음수 발생 방지: 제품 ${paddedNum} 현재 ${cur} - ${item.qty} = ${next} → 0으로 조정. syncStock() 실행 권장.`);
+    }
+    const finalVal = Math.max(0, next);
+    rows[rowIdx][2] = finalVal; // 메모리상에서만 갱신, 실제 쓰기는 마지막에 한 번에
+    // 품목마다 사유를 다르게 남기고 싶으면 item.__reason에 넣어두면 우선 사용됨(없으면 공통 meta.reason)
+    changeLogRows.push([now, paddedNum, meta.reqId || '', meta.name || '', item.__reason || meta.reason || '', '-' + item.qty, finalVal]);
+  });
+
+  // C열(잔여재고) 전체를 한 번에 다시 쓴다 — 바뀐 행만 골라 쓰는 것보다
+  // 연속된 범위를 통째로 쓰는 게 API 호출 1번으로 끝나 훨씬 빠르다.
+  const colValues = rows.slice(1).map(r => [r[2]]);
+  s.getRange(2, 3, colValues.length, 1).setValues(colValues);
+  logStockChangeBatch(changeLogRows);
 }
 
 // 관리자가 신청 수량을 직접 수정할 때 사용 — 재고 부족 상태를 감추지 않고
@@ -1777,9 +1829,8 @@ function mergeIntoRequest({ existingId, items }) {
         }
       });
 
-      items.forEach(item => deductStock(item.num, item.qty, {
-        reqId: existingId, name: rows[i][4], reason: `신청 합치기: ${item.name} +${item.qty}`
-      }));
+      items.forEach(item => { item.__reason = `신청 합치기: ${item.name} +${item.qty}`; });
+      deductStockBatch(items, { reqId: existingId, name: rows[i][4], reason: '신청 합치기' });
 
       const activeTotal = existingItems.filter(it => !it.cancelled).reduce((s2, it) => s2 + (Number(it.qty) || 0), 0);
       s.getRange(i + 1, itemsCol + 1).setValue(JSON.stringify(existingItems));
