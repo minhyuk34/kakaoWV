@@ -1211,12 +1211,29 @@ function submitRequest_({ dept, team, name, contact, email, reason, pickupDate, 
 
 // ── 신청 목록 조회 ────────────────────────────────────────────
 function getRequests({ name, role }) {
-  const rows = sheet(SHEET_REQ).getDataRange().getValues().slice(1);
-  const reqs = [];
+  const sh = sheet(SHEET_REQ);
   const isAdmin = role === 'admin';
   // 이름 비교 시 앞뒤/중복 공백을 무시(다른 곳과 동일 규칙)
   const norm = s => String(s || '').trim().replace(/\s+/g, ' ');
   const wantName = norm(name);
+
+  const lastRow = sh.getLastRow();
+  let rows;
+  if (lastRow < 2) {
+    rows = [];
+  } else if (isAdmin) {
+    rows = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+  } else {
+    // 관리자가 아니면 이름 컬럼(E열)만 먼저 가볍게 읽어서 내 신청 행 번호만 골라낸다.
+    // 신청 건수가 쌓일수록 전체 시트(특히 무거운 물품목록 JSON)를 매번 통째로 읽는 게
+    // 느려지는 주된 원인이라, 남의 신청 데이터는 애초에 전송받지 않는 게 핵심 개선점이다.
+    const names = sh.getRange(2, 5, lastRow - 1, 1).getValues();
+    const matchedRowNums = [];
+    names.forEach((r, i) => { if (norm(r[0]) === wantName) matchedRowNums.push(i + 2); });
+    const lastCol = sh.getLastColumn();
+    rows = matchedRowNums.map(rowNum => sh.getRange(rowNum, 1, 1, lastCol).getValues()[0]);
+  }
+  const reqs = [];
 
   rows.forEach(r => {
     if (!r[0]) return; // 빈 행 skip
