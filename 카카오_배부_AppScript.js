@@ -1082,6 +1082,7 @@ function doPost(e) {
     else if (action === 'getRequests')   result = getRequests(data);
     else if (action === 'updateRequest') result = updateRequest(data);
     else if (action === 'updateRequestSchedule') result = updateRequestSchedule(data);
+    else if (action === 'saveDispatchMemo')  result = saveDispatchMemo(data);
     else if (action === 'getStock')      result = getStock();
     else if (action === 'updateStock')   result = updateStock(data);
     else if (action === 'getProductZones') result = getProductZones();
@@ -1301,11 +1302,24 @@ function getRequests({ name, role }) {
       pickupDate: formatDateOnly(pickupDate),
       useDate: formatDateOnly(useDate),
       items, totalQty, status, updatedAt, adminNote,
-      plannedDate: formatDateOnly(plannedDate)
+      plannedDate: formatDateOnly(plannedDate),
+      dispatchMemo: String(r[16] || '') // 관리자가 직접 적는 출고 메모(17열) — 구형 행엔 없어도 무방
     });
   });
 
   return { ok: true, requests: reqs };
+}
+
+// ── 출고메모(관리자가 직접 적는 자유 메모, 17열) 저장 ──
+function saveDispatchMemo({ id, memo }) {
+  const s = sheet(SHEET_REQ);
+  const rows = s.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) !== String(id)) continue;
+    s.getRange(i + 1, 17).setValue(memo || '');
+    return { ok: true };
+  }
+  return { ok: false, error: '신청을 찾을 수 없습니다.' };
 }
 
 // ── 수취예정일 / 사용예정일 / 배부일 수정 ──

@@ -1331,7 +1331,7 @@ function renderAdminRequests() {
       </select>
     </div>
   </div>
-  <table><thead><tr><th><input type="checkbox" onchange="toggleSelectAllReq(this)"></th><th>신청 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>수취예정일</th><th>사용예정일</th><th>신청 제품</th><th>상태</th><th>처리</th></tr></thead>
+  <table><thead><tr><th><input type="checkbox" onchange="toggleSelectAllReq(this)"></th><th>신청 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>수취예정일</th><th>사용예정일</th><th>신청 제품</th><th>상태</th><th>처리 / 출고메모</th></tr></thead>
   <tbody>${reqs.map(r=>`<tr>
     <td><input type="checkbox" class="req-select-chk" data-id="${r.id}" ${selectedReqIds.has(String(r.id))?'checked':''} onchange="toggleReqSelect('${r.id}',this.checked)"></td>
     <td style="font-size:12px">${r.createdAt}</td>
@@ -1342,13 +1342,34 @@ function renderAdminRequests() {
     <td style="font-size:12px">${dateOnly(r.useDate)||'-'}</td>
     <td><a href="#" onclick="showDetail('${r.id}')" style="color:var(--blue)">${r.items.filter(i=>!i.cancelled).length}종 ${r.items.filter(i=>!i.cancelled).reduce((s,i)=>s+i.qty,0)}개 ▶</a></td>
     <td><span class="status-badge ${r.status}">${statusLabel(r.status)}</span></td>
-    <td>${r.status==='pending'
-      ?`<button class="action-btn approve" onclick="handleRequest('${r.id}','approved')">✓ 승인</button><button class="action-btn reject" onclick="promptReject('${r.id}')">✗ 반려</button>`
-      :`<div style="display:flex;flex-direction:column;gap:4px">
-        <button class="action-btn distribute" onclick="showDistributeModal('${r.id}')">📦 항목별 배부</button>
-      </div>`
-    }</td>
+    <td>
+      <div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap">
+        <div>${r.status==='pending'
+          ?`<button class="action-btn approve" onclick="handleRequest('${r.id}','approved')">✓ 승인</button><button class="action-btn reject" onclick="promptReject('${r.id}')">✗ 반려</button>`
+          :`<div style="display:flex;flex-direction:column;gap:4px">
+            <button class="action-btn distribute" onclick="showDistributeModal('${r.id}')">📦 항목별 배부</button>
+          </div>`
+        }</div>
+        <div style="display:flex;gap:4px;align-items:center">
+          <input id="dispatch-memo-${r.id}" type="text" value="${escAttr(r.dispatchMemo||'')}" placeholder="출고 메모"
+            onkeydown="if(event.key==='Enter')saveDispatchMemo('${r.id}')"
+            style="width:100px;padding:5px 7px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
+          <button onclick="saveDispatchMemo('${r.id}')" title="메모 저장" style="padding:5px 8px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-size:12px;font-weight:700;cursor:pointer">💾</button>
+        </div>
+      </div>
+    </td>
   </tr>`).join('')}</tbody></table>`;
+}
+async function saveDispatchMemo(id) {
+  const input = document.getElementById(`dispatch-memo-${id}`);
+  const memo = input?.value || '';
+  try {
+    const res = await api('saveDispatchMemo', { id, memo });
+    if (!res.ok) { toast('❌ 저장 실패: '+res.error); return; }
+    const r = getRequests().find(x=>String(x.id)===String(id));
+    if (r) r.dispatchMemo = memo;
+    toast('✅ 출고 메모 저장 완료');
+  } catch(e) { toast('❌ 서버 오류: '+e.message); }
 }
 const SCHEDULE_FIELD_LABEL = { pickupDate: '수취예정일', useDate: '사용예정일', plannedDate: '배부일' };
 async function saveReqSchedule(id) {
