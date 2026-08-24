@@ -1845,7 +1845,7 @@ function showDetail(id) {
       <div style="font-size:12px;font-weight:700;color:#6D28D9;margin-bottom:6px">➕ 신청 외 물품 추가 지급</div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <select id="addItem-select-${r.id}" style="flex:1;min-width:180px;padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
-          ${PRODUCTS.map(p=>`<option value="${p.num}">${p.num} - ${p.name}</option>`).join('')}
+          ${PRODUCTS.map(p=>`<option value="${p.num}">${p.num} - ${p.name} (재고 ${getStock(p.num)}개)</option>`).join('')}
         </select>
         <input id="addItem-qty-${r.id}" type="number" min="1" value="1" style="width:70px;padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
         <button onclick="addAdminItemUI('${r.id}')" style="padding:6px 12px;border:none;border-radius:6px;background:#8B5CF6;color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">추가 지급</button>
