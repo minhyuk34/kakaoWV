@@ -1321,7 +1321,10 @@ function renderAdminRequests() {
 
   resultsEl.innerHTML=`
   <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-    <button id="pick-list-btn" onclick="generatePickList()" style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🧾 선택 ${selectedReqIds.size}건 피킹리스트 출력</button>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <button id="pick-list-btn" onclick="generatePickList()" style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🧾 선택 ${selectedReqIds.size}건 피킹리스트 출력</button>
+      <button id="merge-req-btn" onclick="showMergeRequestsModal()" style="background:var(--blue);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🔗 선택 신청 합치기</button>
+    </div>
     <div style="display:flex;align-items:center;gap:8px">
       <label style="font-size:13px;color:var(--muted)">정렬</label>
       <select onchange="setAdminReqSort(this.value)" style="padding:6px 10px;border:2px solid var(--border);border-radius:8px;font-size:13px">
@@ -1331,7 +1334,7 @@ function renderAdminRequests() {
       </select>
     </div>
   </div>
-  <table><thead><tr><th><input type="checkbox" onchange="toggleSelectAllReq(this)"></th><th>신청 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>수취예정일</th><th>사용예정일</th><th>신청 제품</th><th>상태</th><th>처리 / 출고메모</th></tr></thead>
+  <table><thead><tr><th><input type="checkbox" onchange="toggleSelectAllReq(this)"></th><th>신청 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>수취예정일</th><th>사용예정일</th><th>신청 제품</th><th>상태</th><th>처리</th><th>출고메모</th></tr></thead>
   <tbody>${reqs.map(r=>`<tr>
     <td><input type="checkbox" class="req-select-chk" data-id="${r.id}" ${selectedReqIds.has(String(r.id))?'checked':''} onchange="toggleReqSelect('${r.id}',this.checked)"></td>
     <td style="font-size:12px">${r.createdAt}</td>
@@ -1342,20 +1345,18 @@ function renderAdminRequests() {
     <td style="font-size:12px">${dateOnly(r.useDate)||'-'}</td>
     <td><a href="#" onclick="showDetail('${r.id}')" style="color:var(--blue)">${r.items.filter(i=>!i.cancelled).length}종 ${r.items.filter(i=>!i.cancelled).reduce((s,i)=>s+i.qty,0)}개 ▶</a></td>
     <td><span class="status-badge ${r.status}">${statusLabel(r.status)}</span></td>
+    <td>${r.status==='pending'
+      ?`<button class="action-btn approve" onclick="handleRequest('${r.id}','approved')">✓ 승인</button><button class="action-btn reject" onclick="promptReject('${r.id}')">✗ 반려</button>`
+      :`<div style="display:flex;flex-direction:column;gap:4px">
+        <button class="action-btn distribute" onclick="showDistributeModal('${r.id}')">📦 항목별 배부</button>
+      </div>`
+    }</td>
     <td>
-      <div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap">
-        <div>${r.status==='pending'
-          ?`<button class="action-btn approve" onclick="handleRequest('${r.id}','approved')">✓ 승인</button><button class="action-btn reject" onclick="promptReject('${r.id}')">✗ 반려</button>`
-          :`<div style="display:flex;flex-direction:column;gap:4px">
-            <button class="action-btn distribute" onclick="showDistributeModal('${r.id}')">📦 항목별 배부</button>
-          </div>`
-        }</div>
-        <div style="display:flex;gap:4px;align-items:center">
-          <input id="dispatch-memo-${r.id}" type="text" value="${escAttr(r.dispatchMemo||'')}" placeholder="출고 메모"
-            onkeydown="if(event.key==='Enter')saveDispatchMemo('${r.id}')"
-            style="width:100px;padding:5px 7px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
-          <button onclick="saveDispatchMemo('${r.id}')" title="메모 저장" style="padding:5px 8px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-size:12px;font-weight:700;cursor:pointer">💾</button>
-        </div>
+      <div style="display:flex;gap:4px;align-items:center">
+        <input id="dispatch-memo-${r.id}" type="text" value="${escAttr(r.dispatchMemo||'')}" placeholder="출고 메모"
+          onkeydown="if(event.key==='Enter')saveDispatchMemo('${r.id}')"
+          style="width:100px;padding:5px 7px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
+        <button onclick="saveDispatchMemo('${r.id}')" title="메모 저장" style="padding:5px 8px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-size:12px;font-weight:700;cursor:pointer">💾</button>
       </div>
     </td>
   </tr>`).join('')}</tbody></table>`;
@@ -1693,6 +1694,50 @@ function promptReject(id) {
       await loadRequestsFromAPI();
       closeModal(); toast('반려 처리되었습니다'); renderAdmin();
     } catch(e){toast('❌ 서버 오류: '+e.message);}
+  };
+  document.getElementById('modal-overlay').classList.add('open');
+}
+// 관리자가 신청관리에서 체크박스로 고른 여러 건을 하나로 합친다. 각 신청은
+// 접수 시점에 이미 재고가 차감돼 있으므로, 합치기는 재고를 다시 건드리지 않고
+// 물품목록만 기준 신청 하나로 모으는 순수 기록 정리다(백엔드 mergeRequests 참고).
+function showMergeRequestsModal() {
+  const all = getRequests().filter(r => selectedReqIds.has(String(r.id)));
+  const eligible = all.filter(r => r.status==='pending' || r.status==='approved');
+  const excluded = all.filter(r => !(r.status==='pending' || r.status==='approved'));
+  if (eligible.length < 2) {
+    toast('❌ 대기중/승인 상태인 신청을 2건 이상 선택해주세요.');
+    return;
+  }
+  const itemSummary = r => r.items.filter(i=>!i.cancelled).map(i=>`${i.name} ${i.qty}개`).join(', ') || '(항목 없음)';
+  document.getElementById('modal-title').textContent = '🔗 신청 합치기';
+  document.getElementById('modal-body').innerHTML = `
+    <p style="margin-bottom:10px;font-size:13px;color:var(--muted)">기준이 될 신청을 하나 선택하세요. 나머지 신청의 물품이 기준 신청으로 합쳐지고, 나머지 신청은 취소 처리됩니다. (재고는 이미 차감되어 있어 추가로 차감되지 않습니다)</p>
+    ${excluded.length ? `<p style="margin-bottom:10px;font-size:12px;color:var(--red)">⚠️ 이미 배부/취소/반려된 ${excluded.length}건은 대상에서 제외됩니다: ${excluded.map(r=>r.name).join(', ')}</p>` : ''}
+    <div style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto">
+      ${eligible.map((r,i)=>`
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:10px;border:1.5px solid var(--border);border-radius:8px;cursor:pointer">
+          <input type="radio" name="merge-target" value="${r.id}" ${i===0?'checked':''} style="margin-top:3px">
+          <div>
+            <b>${r.name||'-'}</b> <span style="color:var(--muted);font-size:12px">(${r.dept||'-'} · ${r.createdAt})</span>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">${itemSummary(r)}</div>
+          </div>
+        </label>
+      `).join('')}
+    </div>`;
+  document.getElementById('modal-confirm').textContent = '합치기 실행';
+  document.getElementById('modal-confirm').onclick = async () => {
+    const targetInput = document.querySelector('input[name="merge-target"]:checked');
+    if (!targetInput) { toast('❌ 기준 신청을 선택해주세요.'); return; }
+    const targetId = targetInput.value;
+    const sourceIds = eligible.map(r=>String(r.id)).filter(sid=>sid!==String(targetId));
+    if (!confirm(`선택한 ${sourceIds.length}건을 기준 신청으로 합치시겠습니까? 되돌릴 수 없습니다.`)) return;
+    try {
+      const res = await api('mergeRequests', { targetId, sourceIds, adminName: currentUser.name });
+      if (!res.ok) { toast('❌ 합치기 실패: '+res.error); return; }
+      selectedReqIds.clear();
+      await loadRequestsFromAPI();
+      closeModal(); toast('✅ 신청 합치기 완료'); renderAdmin();
+    } catch(e) { toast('❌ 서버 오류: '+e.message); }
   };
   document.getElementById('modal-overlay').classList.add('open');
 }

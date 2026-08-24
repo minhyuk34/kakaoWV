@@ -1079,6 +1079,7 @@ function doPost(e) {
     else if (action === 'login')         result = login(data);
     else if (action === 'submitRequest') result = submitRequest(data);
     else if (action === 'mergeIntoRequest') result = mergeIntoRequest(data);
+    else if (action === 'mergeRequests')    result = mergeRequests(data);
     else if (action === 'getRequests')   result = getRequests(data);
     else if (action === 'updateRequest') result = updateRequest(data);
     else if (action === 'updateRequestSchedule') result = updateRequestSchedule(data);
@@ -1109,7 +1110,7 @@ function doPost(e) {
     const REPORT_TRIGGER_ACTIONS = [
       'submitRequest', 'updateRequest', 'approveItems', 'distributeItems',
       'cancelRequest', 'cancelItems', 'confirmCancelItem', 'rejectCancelItem',
-      'updateRequestSchedule', 'updateItemQty', 'mergeIntoRequest', 'returnDistributedQty',
+      'updateRequestSchedule', 'updateItemQty', 'mergeIntoRequest', 'mergeRequests', 'returnDistributedQty',
       'editDistributedQty', 'addAdminItem'
     ];
     if (action === 'generateReport') {
@@ -1875,6 +1876,98 @@ function mergeIntoRequest({ existingId, items }) {
       return { ok: true, id: existingId };
     }
     return { ok: false, error: '기존 신청을 찾을 수 없습니다.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ── 관리자 - 이미 접수된 신청 여러 건을 기준 신청 하나로 합치기 ─────
+// submitRequest 시점에 각 신청의 재고가 이미 차감돼 있으므로, 여기서는
+// 재고를 다시 건드리지 않고 물품목록만 기준(target) 신청으로 모으는
+// 순수 기록 정리다. 나머지(source) 신청들은 cancelled로 표시하되,
+// cancelRequest()와 달리 재고를 복구하지 않는다(이미 target에 남아있으므로).
+function mergeRequests({ targetId, sourceIds, adminName }) {
+  if (!targetId || !sourceIds || !sourceIds.length) {
+    return { ok: false, error: '합칠 신청을 선택해주세요.' };
+  }
+  const ids = [...new Set(sourceIds.map(String))].filter(sid => sid !== String(targetId));
+  if (ids.length === 0) return { ok: false, error: '기준 신청 외에 합칠 신청이 없습니다.' };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = sheet(SHEET_REQ);
+    const rows = s.getDataRange().getValues();
+
+    const rowIndexById = {};
+    rows.forEach((r, i) => { if (r[0]) rowIndexById[String(r[0])] = i; });
+
+    const isOld = r => String(r[8]).trim().startsWith('[') || String(r[8]).trim().startsWith('{');
+    const itemsCol = 10, totalQtyCol = 11, statusCol = 12, updatedCol = 13, noteCol = 14;
+
+    const targetIdx = rowIndexById[String(targetId)];
+    if (targetIdx === undefined) return { ok: false, error: '기준 신청을 찾을 수 없습니다.' };
+    if (isOld(rows[targetIdx])) return { ok: false, error: '구형 신청 건은 합칠 수 없습니다.' };
+
+    const targetStatus = String(rows[targetIdx][statusCol] || '');
+    if (targetStatus !== 'pending' && targetStatus !== 'approved') {
+      return { ok: false, error: '기준 신청은 대기중이거나 승인된 상태여야 합칠 수 있습니다.' };
+    }
+
+    let targetItems = [];
+    try { targetItems = JSON.parse(rows[targetIdx][itemsCol] || '[]'); } catch (e) {}
+    if (targetItems.some(it => it.distributed)) {
+      return { ok: false, error: '이미 일부 배부된 신청은 합칠 수 없습니다.' };
+    }
+
+    // 먼저 전체 검증부터 마친 뒤에 시트를 쓴다(중간에 실패하면 일부만 합쳐지는 것을 방지).
+    const sourceItemsById = {};
+    for (const sid of ids) {
+      const idx = rowIndexById[sid];
+      if (idx === undefined) return { ok: false, error: `신청(${sid})을 찾을 수 없습니다.` };
+      if (isOld(rows[idx])) return { ok: false, error: '구형 신청 건은 합칠 수 없습니다.' };
+
+      const status = String(rows[idx][statusCol] || '');
+      if (status !== 'pending' && status !== 'approved') {
+        return { ok: false, error: `이미 배부/취소/반려된 신청(${rows[idx][4]})은 합칠 수 없습니다.` };
+      }
+
+      let items = [];
+      try { items = JSON.parse(rows[idx][itemsCol] || '[]'); } catch (e) {}
+      if (items.some(it => it.distributed)) {
+        return { ok: false, error: `이미 일부 배부된 신청(${rows[idx][4]})은 합칠 수 없습니다.` };
+      }
+      sourceItemsById[sid] = items;
+    }
+
+    ids.forEach(sid => {
+      const items = sourceItemsById[sid];
+      items.filter(it => !it.cancelled).forEach(newItem => {
+        const match = targetItems.find(it =>
+          String(it.num).padStart(3, '0') === String(newItem.num).padStart(3, '0') && !it.cancelled
+        );
+        if (match) {
+          match.qty = (Number(match.qty) || 0) + Number(newItem.qty);
+        } else {
+          targetItems.push({
+            num: newItem.num, name: newItem.name, qty: newItem.qty,
+            price: newItem.price || 0, detail: newItem.detail || ''
+          });
+        }
+      });
+
+      const idx = rowIndexById[sid];
+      s.getRange(idx + 1, statusCol + 1).setValue('cancelled');
+      s.getRange(idx + 1, noteCol + 1).setValue(`⚑ ${adminName || '관리자'}가 신청 #${targetId}(으)로 합침`);
+      s.getRange(idx + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
+    });
+
+    const activeTotal = targetItems.filter(it => !it.cancelled).reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
+    s.getRange(targetIdx + 1, itemsCol + 1).setValue(JSON.stringify(targetItems));
+    s.getRange(targetIdx + 1, totalQtyCol + 1).setValue(activeTotal);
+    s.getRange(targetIdx + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
+
+    return { ok: true, id: targetId };
   } finally {
     lock.releaseLock();
   }
