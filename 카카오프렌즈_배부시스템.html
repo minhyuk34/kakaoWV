@@ -448,7 +448,7 @@ tr:hover td{background:var(--card)}
     <h2>📋 주문내역</h2>
     <div style="display:flex;gap:8px">
       <button onclick="downloadMyReqExcel()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">📥 엑셀 다운로드</button>
-      <button onclick="refreshMyReq()" style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🔄 새로고침</button>
+      <button onclick="refreshMyReq()" style="background:var(--kakao);color:var(--on-primary);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🔄 새로고침</button>
     </div>
   </div>
   <div id="myreq-content"></div>
@@ -481,7 +481,7 @@ tr:hover td{background:var(--card)}
     <div style="display:flex;align-items:center;gap:10px">
       <span id="admin-last-update" style="font-size:12px;color:var(--muted)"></span>
       <button onclick="refreshAdmin()" id="admin-refresh-btn"
-        style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px">
+        style="background:var(--kakao);color:var(--on-primary);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px">
         🔄 새로고침
       </button>
     </div>
@@ -495,7 +495,7 @@ tr:hover td{background:var(--card)}
 <div class="page" id="page-feedback">
   <div class="section-header">
     <h2>💬 시스템 피드백</h2>
-    <button onclick="loadFeedback()" style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🔄 새로고침</button>
+    <button onclick="loadFeedback()" style="background:var(--kakao);color:var(--on-primary);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🔄 새로고침</button>
   </div>
 
   <!-- 피드백 작성 폼 -->
@@ -535,7 +535,7 @@ tr:hover td{background:var(--card)}
         onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'"></textarea>
     </div>
 
-    <button onclick="submitFeedback()" style="width:100%;padding:12px;border:none;border-radius:10px;background:var(--brown);color:var(--kakao);font-size:15px;font-weight:800;cursor:pointer">💬 피드백 제출</button>
+    <button onclick="submitFeedback()" style="width:100%;padding:12px;border:none;border-radius:10px;background:var(--kakao);color:var(--on-primary);font-size:15px;font-weight:800;cursor:pointer">💬 피드백 제출</button>
   </div>
 
   <!-- 전체 피드백 목록 (관리자만 보임) -->
@@ -1149,7 +1149,7 @@ function distLogSectionHtml(reqId, idx, item) {
       <td colspan="2">
         <button id="distlog-add-${reqId}-${idx}" onclick="addDistLogRow('${reqId}',${idx})" ${n>=10?'disabled':''}
           style="font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;margin-right:6px">+ 행 추가</button>
-        <button onclick="saveDistLogEntry('${reqId}',${idx})" style="font-size:12px;padding:5px 14px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-weight:700;cursor:pointer">💾 저장</button>
+        <button onclick="saveDistLogEntry('${reqId}',${idx})" style="font-size:12px;padding:5px 14px;border:none;border-radius:6px;background:var(--kakao);color:var(--on-primary);font-weight:700;cursor:pointer">💾 저장</button>
       </td>
     </tr>`;
 
@@ -1330,7 +1330,7 @@ function renderAdminRequests() {
   resultsEl.innerHTML=`
   <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <button id="pick-list-btn" onclick="generatePickList()" style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🧾 선택 ${selectedReqIds.size}건 피킹리스트 출력</button>
+      <button id="pick-list-btn" onclick="generatePickList()" style="background:var(--kakao);color:var(--on-primary);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🧾 선택 ${selectedReqIds.size}건 피킹리스트 출력</button>
       <button id="merge-req-btn" onclick="showMergeRequestsModal()" style="background:var(--blue);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">🔗 선택 신청 합치기</button>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
@@ -1364,7 +1364,7 @@ function renderAdminRequests() {
         <input id="dispatch-memo-${r.id}" type="text" value="${escAttr(r.dispatchMemo||'')}" placeholder="출고 메모"
           onkeydown="if(event.key==='Enter')saveDispatchMemo('${r.id}')"
           style="width:100px;padding:5px 7px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
-        <button onclick="saveDispatchMemo('${r.id}')" title="메모 저장" style="padding:5px 8px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-size:12px;font-weight:700;cursor:pointer">💾</button>
+        <button onclick="saveDispatchMemo('${r.id}')" title="메모 저장" style="padding:5px 8px;border:none;border-radius:6px;background:var(--kakao);color:var(--on-primary);font-size:12px;font-weight:700;cursor:pointer">💾</button>
       </div>
     </td>
   </tr>`).join('')}</tbody></table>`;
@@ -1546,10 +1546,10 @@ function renderAdminInventory() {
     </tr>`;
   }).join('');
 
-  const thStyle = 'position:sticky;top:0;background:var(--brown);color:var(--kakao);z-index:1';
+  const thStyle = 'position:sticky;top:0;background:var(--card);color:var(--text);z-index:1';
   el.innerHTML=`<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
     <button onclick="refreshReportSheet()" id="report-refresh-btn"
-      style="background:var(--brown);color:var(--kakao);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">
+      style="background:var(--kakao);color:var(--on-primary);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">
       📊 배부현황 시트 새로고침
     </button>
   </div>
@@ -1816,7 +1816,7 @@ function showDetail(id) {
       <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
         <label style="font-size:11px;color:var(--muted);white-space:nowrap">수량 수정</label>
         <input id="qty-input-${id}-${idx}" type="number" min="0" value="${i.qty}" style="width:80px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
-        <button onclick="saveItemQty('${id}',${idx})" style="padding:4px 10px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">💾 저장</button>
+        <button onclick="saveItemQty('${id}',${idx})" style="padding:4px 10px;border:none;border-radius:6px;background:var(--kakao);color:var(--on-primary);font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">💾 저장</button>
       </div>`:''}
     </div>`;
   }).join('');
@@ -1872,7 +1872,7 @@ function showDetail(id) {
       <div><span style="color:var(--muted)">사용예정일</span> &nbsp;<input id="sched-useDate-${r.id}" type="date" value="${dateOnly(r.useDate)}" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
       <div><span style="color:var(--muted)">배부일</span> &nbsp;<input id="sched-plannedDate-${r.id}" type="date" value="${dateOnly(r.plannedDate)}" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
       <div style="display:flex;align-items:flex-end">
-        <button id="sched-save-btn-${r.id}" onclick="saveReqSchedule('${r.id}')" style="width:100%;padding:7px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-size:13px;font-weight:700;cursor:pointer">💾 날짜 저장</button>
+        <button id="sched-save-btn-${r.id}" onclick="saveReqSchedule('${r.id}')" style="width:100%;padding:7px;border:none;border-radius:6px;background:var(--kakao);color:var(--on-primary);font-size:13px;font-weight:700;cursor:pointer">💾 날짜 저장</button>
       </div>
       ` : `
       <div><span style="color:var(--muted)">수취예정일</span> &nbsp;<b>${dateOnly(r.pickupDate)||'-'}</b></div>
@@ -2274,7 +2274,7 @@ function renderWarehouseMap() {
         <div style="display:flex;flex-wrap:wrap;gap:6px">
           ${unassigned.map(p=>`<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid var(--border);border-radius:14px;padding:3px 4px 3px 10px;font-size:12px">
             ${p.name}
-            <button onclick="moveProductZone('${p.num}','${p.name.replace(/'/g,"\\'")}','')" style="font-size:11px;padding:2px 8px;border:none;border-radius:10px;background:var(--brown);color:var(--kakao);cursor:pointer">📍 지정</button>
+            <button onclick="moveProductZone('${p.num}','${p.name.replace(/'/g,"\\'")}','')" style="font-size:11px;padding:2px 8px;border:none;border-radius:10px;background:var(--kakao);color:var(--on-primary);cursor:pointer">📍 지정</button>
           </span>`).join('')}
         </div>` : `<div style="font-size:12px;color:var(--muted)">${unassigned.map(p=>p.name).join(', ')}</div>`}
       </div>` : '';
@@ -2446,7 +2446,7 @@ function showDistributeModal(id) {
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center">
         <input id="bulk-date"   type="date"  style="padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none" placeholder="배부일">
         <input id="bulk-method" type="text"  style="padding:6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none" placeholder="배부방법 (예: 직접전달, 택배)">
-        <button onclick="applyBulkInput()" style="padding:6px 14px;border:none;border-radius:6px;background:var(--brown);color:var(--kakao);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">전체 적용</button>
+        <button onclick="applyBulkInput()" style="padding:6px 14px;border:none;border-radius:6px;background:var(--kakao);color:var(--on-primary);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">전체 적용</button>
       </div>
     </div>
     <div style="font-size:11px;color:var(--muted);padding:0 4px 6px;display:grid;grid-template-columns:24px 1fr 70px 105px;gap:6px">
