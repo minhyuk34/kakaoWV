@@ -9,39 +9,39 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root {
-  /* Zapier 스타일 디자인 시스템(DESIGN-zapier.md)을 적용한 팔레트.
-     --kakao/--brown 변수명은 그대로 두되(코드 전역에서 참조되므로) 실제 색상값만
-     크림 캔버스 + 커피 잉크 + 오렌지 CTA 조합으로 교체했다. 승인/반려/배부 등
+  /* 월드비전코리아 실제 홈페이지 톤앤매너(흰 배경 + 연한 피치 섹션 틴트 + 단일
+     오렌지 CTA + 다크 네이비 텍스트)로 맞춘 팔레트. --kakao/--brown 변수명은
+     코드 전역에서 참조되므로 그대로 두고 실제 색상값만 교체했다. 승인/반려/배부 등
      상태를 구분해야 하는 초록/빨강/파랑 시맨틱 컬러는 가독성을 위해 유지. */
-  --kakao:#ff4f00; --kakao-dark:#e64600; --brown:#201515; --bg:#fffefb;
-  --card:#f8f4f0; --border:#e3ddd0; --text:#201515; --muted:#939084;
+  --kakao:#F4761F; --kakao-dark:#D9600F; --brown:#22252A; --bg:#FFFFFF;
+  --card:#FDF1E7; --border:#EEE9E2; --text:#22252A; --muted:#767676;
   --green:#00B894; --red:#E17055; --blue:#0984E3; --orange:#FDCB6E;
-  --ink-soft:#2f2a26; --on-primary:#fffefb;
+  --ink-soft:#33363C; --on-primary:#FFFFFF;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter','Apple SD Gothic Neo','Noto Sans KR',sans-serif;background:var(--bg);color:var(--text)}
 nav{background:var(--bg);color:var(--text);display:flex;align-items:center;padding:0 24px;height:56px;gap:16px;position:sticky;top:0;z-index:100;box-shadow:0 1px 0 var(--border);border-bottom:1px solid var(--border)}
 nav .logo{font-size:18px;font-weight:700;color:var(--kakao);margin-right:auto;display:flex;align-items:center;gap:8px}
-nav button{background:transparent;border:1.5px solid var(--border);color:var(--text);padding:6px 14px;border-radius:12px;cursor:pointer;font-size:13px;transition:all .2s}
+nav button{background:transparent;border:1.5px solid var(--border);color:var(--text);padding:6px 14px;border-radius:999px;cursor:pointer;font-size:13px;transition:all .2s}
 nav button.active,nav button:hover{background:var(--kakao);color:var(--on-primary);border-color:var(--kakao);font-weight:600}
 nav .badge{background:var(--red);color:#fff;border-radius:50%;font-size:11px;padding:1px 5px;margin-left:-8px;margin-top:-10px}
 nav .user-info{font-size:13px;color:var(--kakao);font-weight:600}
 .page{display:none;padding:24px;max-width:1280px;margin:0 auto}
 .page.active{display:block}
-.hero{background:linear-gradient(135deg,var(--brown) 0%,var(--ink-soft) 100%);color:var(--on-primary);border-radius:12px;padding:32px;margin-bottom:24px;display:flex;align-items:center;gap:24px}
-.hero h1{font-size:26px;font-weight:800;color:var(--kakao)}
-.hero p{font-size:14px;color:rgba(255,254,251,.8);margin-top:6px}
+.hero{background:var(--card);color:var(--text);border-radius:16px;padding:32px;margin-bottom:24px;display:flex;align-items:center;gap:24px}
+.hero h1{font-size:26px;font-weight:800;color:var(--text)}
+.hero p{font-size:14px;color:var(--muted);margin-top:6px}
 .hero-stats{display:flex;gap:24px;margin-left:auto}
-.stat{text-align:center;background:rgba(255,254,251,.1);border-radius:12px;padding:16px 20px}
+.stat{text-align:center;background:var(--bg);border-radius:12px;padding:16px 20px;box-shadow:0 1px 4px rgba(34,37,42,.08)}
 .stat-num{font-size:28px;font-weight:800;color:var(--kakao)}
-.stat-label{font-size:12px;color:rgba(255,254,251,.7);margin-top:2px}
+.stat-label{font-size:12px;color:var(--muted);margin-top:2px}
 .filters{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;align-items:center}
 .filters input,.filters select{padding:10px 14px;border:2px solid var(--border);border-radius:10px;font-size:14px;outline:none}
 .filters input{flex:1;min-width:200px}.filters input:focus{border-color:var(--kakao)}
 .result-count{font-size:13px;color:var(--muted);margin-left:auto}
 .product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}
-.product-card{background:var(--card);border-radius:12px;border:1.5px solid var(--border);padding:16px;transition:all .2s}
-.product-card:hover{border-color:var(--kakao);box-shadow:0 4px 20px rgba(255,79,0,.15);transform:translateY(-2px)}
+.product-card{background:var(--bg);border-radius:16px;border:1.5px solid var(--border);padding:16px;transition:all .2s;box-shadow:0 1px 4px rgba(34,37,42,.05)}
+.product-card:hover{border-color:var(--kakao);box-shadow:0 4px 20px rgba(244,118,31,.15);transform:translateY(-2px)}
 .prod-img-wrap{width:100%;height:160px;border-radius:10px;overflow:hidden;background:var(--card);display:flex;align-items:center;justify-content:center}
 .prod-img{width:100%;height:100%;object-fit:cover;transition:transform .3s}
 .product-card:hover .prod-img{transform:scale(1.05)}
@@ -58,8 +58,8 @@ nav .user-info{font-size:13px;color:var(--kakao);font-weight:600}
 .wh-col-headers .wh-col-head{text-align:center;font-size:13px;font-weight:800;color:var(--brown)}
 .wh-grid{display:grid;grid-template-columns:60px 1fr 26px 1fr 26px 1fr 26px 1fr;gap:8px;background:var(--card);border:1.5px solid var(--border);border-radius:12px;padding:14px}
 .wh-row-label{display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:var(--brown);writing-mode:vertical-rl}
-.wh-zone{background:linear-gradient(155deg,#ffcfae 0%,#ffb37d 55%,#ff9a52 100%);border:3px solid var(--brown);border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;transition:transform .15s,box-shadow .15s;min-height:64px;display:flex;flex-direction:column;justify-content:center;gap:2px;box-shadow:0 2px 0 rgba(32,21,21,.25),0 3px 8px rgba(0,0,0,.1)}
-.wh-zone:hover{transform:translateY(-3px);box-shadow:0 5px 0 rgba(32,21,21,.25),0 8px 16px rgba(0,0,0,.18)}
+.wh-zone{background:linear-gradient(155deg,#ffd9b8 0%,#ffb877 55%,#f4761f 100%);border:3px solid var(--brown);border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;transition:transform .15s,box-shadow .15s;min-height:64px;display:flex;flex-direction:column;justify-content:center;gap:2px;box-shadow:0 2px 0 rgba(34,37,42,.25),0 3px 8px rgba(0,0,0,.1)}
+.wh-zone:hover{transform:translateY(-3px);box-shadow:0 5px 0 rgba(34,37,42,.25),0 8px 16px rgba(0,0,0,.18)}
 .wh-zone-code{font-size:13px;font-weight:900;color:var(--brown)}
 .wh-zone-count{font-size:16px;font-weight:900;color:var(--brown)}
 .wh-zone-species{font-size:10px;color:var(--brown);opacity:.8;font-weight:600}
@@ -77,16 +77,16 @@ nav .user-info{font-size:13px;color:var(--kakao);font-weight:600}
 .qty-row{display:flex;align-items:center;gap:8px;margin-top:12px}
 .qty-input{width:70px;text-align:center;border:2px solid var(--kakao);border-radius:6px;padding:6px 4px;font-size:14px;font-weight:600;outline:none}
 .qty-input:focus{border-color:var(--brown)}
-.add-btn{flex:1;background:var(--kakao);color:var(--on-primary);border:none;border-radius:12px;padding:8px;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s}
+.add-btn{flex:1;background:var(--kakao);color:var(--on-primary);border:none;border-radius:999px;padding:8px;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s}
 .add-btn:hover{background:var(--kakao-dark)}.add-btn:disabled{background:var(--border);color:var(--muted);cursor:not-allowed}
-.cart-section{background:var(--card);border-radius:12px;border:1.5px solid var(--border);padding:20px;margin-bottom:24px}
+.cart-section{background:var(--bg);border-radius:16px;border:1.5px solid var(--border);padding:20px;margin-bottom:24px;box-shadow:0 1px 4px rgba(34,37,42,.05)}
 .cart-section h2{font-size:16px;font-weight:700;margin-bottom:14px}
 .cart-item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
 .cart-item:last-child{border-bottom:none}
 .cart-item .ci-name{flex:1;font-size:14px;font-weight:500}
 .cart-item .ci-qty{font-size:14px;color:var(--muted)}
 .remove-btn{background:none;border:none;color:var(--red);cursor:pointer;font-size:16px}
-.submit-btn{width:100%;background:var(--kakao);color:var(--on-primary);border:none;border-radius:12px;padding:14px;font-size:16px;font-weight:800;cursor:pointer;margin-top:12px;transition:all .2s}
+.submit-btn{width:100%;background:var(--kakao);color:var(--on-primary);border:none;border-radius:999px;padding:14px;font-size:16px;font-weight:800;cursor:pointer;margin-top:12px;transition:all .2s}
 .submit-btn:hover{background:var(--kakao-dark)}.submit-btn:disabled{background:var(--border);color:var(--muted);cursor:not-allowed}
 .form-field{margin-bottom:12px}
 .form-field label{font-size:12px;font-weight:600;color:var(--muted)}
@@ -95,8 +95,8 @@ nav .user-info{font-size:13px;color:var(--kakao);font-weight:600}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
 .section-header h2{font-size:18px;font-weight:700}
-table{width:100%;border-collapse:collapse;background:var(--bg);border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(32,21,21,.06)}
-thead{background:var(--brown);color:var(--kakao)}
+table{width:100%;border-collapse:collapse;background:var(--bg);border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(34,37,42,.06)}
+thead{background:var(--card);color:var(--text)}
 th{padding:12px 16px;text-align:left;font-size:13px;font-weight:700}
 td{padding:11px 16px;font-size:13px;border-bottom:1px solid var(--border)}
 tr:last-child td{border-bottom:none}
@@ -113,25 +113,25 @@ tr:hover td{background:var(--card)}
 .action-btn:disabled{background:var(--border);color:var(--muted);cursor:not-allowed}
 .tabs{display:flex;gap:4px;margin-bottom:20px;background:var(--card);padding:4px;border-radius:12px;width:fit-content}
 .tab{padding:8px 18px;border-radius:8px;border:none;background:transparent;font-size:14px;font-weight:600;cursor:pointer;color:var(--muted);transition:all .2s}
-.tab.active{background:var(--bg);color:var(--brown);box-shadow:0 1px 4px rgba(32,21,21,.1)}
+.tab.active{background:var(--bg);color:var(--brown);box-shadow:0 1px 4px rgba(34,37,42,.1)}
 .dash-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px}
-.dash-card{background:var(--card);border-radius:12px;padding:20px;border:1.5px solid var(--border)}
+.dash-card{background:var(--bg);border-radius:16px;padding:20px;border:1.5px solid var(--border);box-shadow:0 1px 4px rgba(34,37,42,.05)}
 .dash-card .dc-label{font-size:13px;color:var(--muted);font-weight:500}
 .dash-card .dc-val{font-size:32px;font-weight:800;margin:6px 0}
 .dash-card.yellow{border-color:var(--kakao)}.dash-card.green{border-color:var(--green)}.dash-card.blue{border-color:var(--blue)}
-#toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--brown);color:var(--kakao);padding:12px 24px;border-radius:12px;font-size:14px;font-weight:600;display:none;z-index:9999;box-shadow:0 4px 20px rgba(32,21,21,.3)}
-.modal-overlay{position:fixed;inset:0;background:rgba(32,21,21,.5);z-index:200;display:none;align-items:center;justify-content:center}
+#toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--kakao);color:var(--on-primary);padding:12px 24px;border-radius:999px;font-size:14px;font-weight:600;display:none;z-index:9999;box-shadow:0 4px 20px rgba(34,37,42,.3)}
+.modal-overlay{position:fixed;inset:0;background:rgba(34,37,42,.5);z-index:200;display:none;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex}
-.modal{background:var(--bg);border-radius:16px;padding:28px;width:480px;max-width:90vw;max-height:80vh;overflow-y:auto}
+.modal{background:var(--bg);border-radius:20px;padding:28px;width:480px;max-width:90vw;max-height:80vh;overflow-y:auto}
 .modal h3{font-size:18px;font-weight:700;margin-bottom:16px}
 .modal-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:14px}
 .modal-footer{display:flex;gap:8px;margin-top:16px}
-.modal-footer button{flex:1;padding:12px;border-radius:12px;border:none;font-size:14px;font-weight:700;cursor:pointer}
+.modal-footer button{flex:1;padding:12px;border-radius:999px;border:none;font-size:14px;font-weight:700;cursor:pointer}
 .modal-footer .btn-cancel{background:var(--card);color:var(--text)}
 .modal-footer .btn-confirm{background:var(--kakao);color:var(--on-primary)}
 .empty{text-align:center;padding:60px 20px;color:var(--muted)}
 .empty .emoji{font-size:48px;margin-bottom:12px}
-.req-card{background:var(--bg);border-radius:12px;border:1.5px solid var(--border);padding:20px;margin-bottom:16px}
+.req-card{background:var(--bg);border-radius:16px;border:1.5px solid var(--border);padding:20px;margin-bottom:16px;box-shadow:0 1px 4px rgba(34,37,42,.05)}
 .req-info-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 16px;font-size:13px;background:var(--card);border-radius:8px;padding:10px 14px;margin-bottom:10px}
 @media(max-width:768px){
   /* 전체 페이지 */
@@ -234,50 +234,50 @@ tr:hover td{background:var(--card)}
 </nav>
 
 <!-- 로그인 화면 -->
-<div id="login-screen" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--brown) 0%,var(--ink-soft) 100%);padding:24px">
+<div id="login-screen" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--card) 0%,var(--bg) 100%);padding:24px">
   <div style="display:flex;gap:24px;align-items:flex-start;max-width:860px;width:100%">
 
   <!-- 안내 패널 -->
-  <div style="flex:1;min-width:0;color:#fff">
+  <div style="flex:1;min-width:0;color:var(--text)">
     <div style="font-size:13px;font-weight:700;color:var(--kakao);letter-spacing:.5px;margin-bottom:16px">📢 사용 전 꼭 읽어주세요</div>
 
     <div style="display:flex;flex-direction:column;gap:14px">
       <!-- 1 -->
-      <div style="background:rgba(255,255,255,.08);border-radius:12px;padding:14px 16px;border-left:3px solid #E17055">
+      <div style="background:var(--bg);border-radius:12px;padding:14px 16px;border-left:3px solid #E17055;box-shadow:0 1px 4px rgba(34,37,42,.06)">
         <div style="font-size:12px;font-weight:800;color:#E17055;margin-bottom:4px">🔒 내부 전용</div>
-        <div style="font-size:13px;line-height:1.6;color:rgba(255,255,255,.9)">이 시스템은 <b>월드비전 내부 직원 전용</b>입니다. 외부로 유출하지 말아주세요.</div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text)">이 시스템은 <b>월드비전 내부 직원 전용</b>입니다. 외부로 유출하지 말아주세요.</div>
       </div>
 
       <!-- 2 -->
-      <div style="background:rgba(255,255,255,.08);border-radius:12px;padding:14px 16px;border-left:3px solid var(--kakao)">
+      <div style="background:var(--bg);border-radius:12px;padding:14px 16px;border-left:3px solid var(--kakao);box-shadow:0 1px 4px rgba(34,37,42,.06)">
         <div style="font-size:12px;font-weight:800;color:var(--kakao);margin-bottom:4px">🧪 테스트 버전 안내</div>
-        <div style="font-size:13px;line-height:1.6;color:rgba(255,255,255,.9)">이 시스템은 <b>8월 오픈 예정인 GIK플랫폼의 테스트 버전</b>입니다.<br>불편하시거나 의견이 있으신 분은 편하게 알려주세요 😊<br>
-        <span style="margin-top:6px;display:inline-block;background:rgba(254,229,0,.15);border-radius:6px;padding:4px 10px;font-size:12px;color:var(--kakao)">📮 월드비전 자산기금팀 장민혁 차장</span></div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text)">이 시스템은 <b>8월 오픈 예정인 GIK플랫폼의 테스트 버전</b>입니다.<br>불편하시거나 의견이 있으신 분은 편하게 알려주세요 😊<br>
+        <span style="margin-top:6px;display:inline-block;background:rgba(244,118,31,.12);border-radius:6px;padding:4px 10px;font-size:12px;color:var(--kakao-dark)">📮 월드비전 자산기금팀 장민혁 차장</span></div>
       </div>
 
       <!-- 3 -->
-      <div style="background:rgba(255,255,255,.08);border-radius:12px;padding:14px 16px;border-left:3px solid #00B894">
+      <div style="background:var(--bg);border-radius:12px;padding:14px 16px;border-left:3px solid #00B894;box-shadow:0 1px 4px rgba(34,37,42,.06)">
         <div style="font-size:12px;font-weight:800;color:#00B894;margin-bottom:6px">🐾 카카오프렌즈는 소중한 후원자입니다</div>
-        <div style="font-size:13px;line-height:1.6;color:rgba(255,255,255,.9);margin-bottom:8px">후원해주신 물품은 반드시 필요한 곳에 사용해주세요.</div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text);margin-bottom:8px">후원해주신 물품은 반드시 필요한 곳에 사용해주세요.</div>
         <div style="display:flex;flex-direction:column;gap:5px">
-          <div style="font-size:12px;color:rgba(255,255,255,.85);display:flex;gap:8px;align-items:flex-start"><span style="color:#00B894;font-weight:700;white-space:nowrap">(1)</span><span>WV 아동에게 직접 배부</span></div>
-          <div style="font-size:12px;color:rgba(255,255,255,.85);display:flex;gap:8px;align-items:flex-start"><span style="color:#00B894;font-weight:700;white-space:nowrap">(2)</span><span>아동 대상으로 한 캠페인</span></div>
-          <div style="font-size:12px;color:rgba(255,255,255,.85);display:flex;gap:8px;align-items:flex-start"><span style="color:#00B894;font-weight:700;white-space:nowrap">(3)</span><span>후원자 대상 캠페인</span></div>
-          <div style="font-size:12px;color:rgba(255,255,255,.85);display:flex;gap:8px;align-items:flex-start"><span style="color:#00B894;font-weight:700;white-space:nowrap">(4)</span><span>모금캠페인</span></div>
-          <div style="font-size:12px;color:rgba(255,255,255,.85);display:flex;gap:8px;align-items:flex-start"><span style="color:#00B894;font-weight:700;white-space:nowrap">(5)</span><span>기타 — 이 밖의 사유로 신청하실 경우 제가 한번 연락드리겠습니다 :) 반려되더라도 속상해하지 말아주세요.</span></div>
+          <div style="font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:flex-start"><span style="color:#00B894;font-weight:700;white-space:nowrap">(1)</span><span>WV 아동에게 직접 배부</span></div>
+          <div style="font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:flex-start"><span style="color:#00B894;font-weight:700;white-space:nowrap">(2)</span><span>아동 대상으로 한 캠페인</span></div>
+          <div style="font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:flex-start"><span style="color:#00B894;font-weight:700;white-space:nowrap">(3)</span><span>후원자 대상 캠페인</span></div>
+          <div style="font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:flex-start"><span style="color:#00B894;font-weight:700;white-space:nowrap">(4)</span><span>모금캠페인</span></div>
+          <div style="font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:flex-start"><span style="color:#00B894;font-weight:700;white-space:nowrap">(5)</span><span>기타 — 이 밖의 사유로 신청하실 경우 제가 한번 연락드리겠습니다 :) 반려되더라도 속상해하지 말아주세요.</span></div>
         </div>
       </div>
 
       <!-- 4 -->
-      <div style="background:rgba(255,255,255,.08);border-radius:12px;padding:14px 16px;border-left:3px solid #0984E3">
-        <div style="font-size:12px;font-weight:800;color:#74B9FF;margin-bottom:4px">✍️ 회원가입 안내</div>
-        <div style="font-size:13px;line-height:1.6;color:rgba(255,255,255,.9)">이름과 비밀번호만 입력하시면 됩니다. <b>가명도 가능</b>합니다.</div>
+      <div style="background:var(--bg);border-radius:12px;padding:14px 16px;border-left:3px solid #0984E3;box-shadow:0 1px 4px rgba(34,37,42,.06)">
+        <div style="font-size:12px;font-weight:800;color:#0984E3;margin-bottom:4px">✍️ 회원가입 안내</div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text)">이름과 비밀번호만 입력하시면 됩니다. <b>가명도 가능</b>합니다.</div>
       </div>
     </div>
   </div>
 
   <!-- 로그인 카드 -->
-  <div style="background:var(--bg);border-radius:20px;padding:36px 32px;width:380px;flex-shrink:0;box-shadow:0 20px 60px rgba(32,21,21,.4)">
+  <div style="background:var(--bg);border-radius:20px;padding:36px 32px;width:380px;flex-shrink:0;box-shadow:0 20px 60px rgba(34,37,42,.14)">
     <div style="text-align:center;margin-bottom:24px">
       <!-- World Vision 로고 -->
         <img src="data:image/png;base64,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" style="height:60px;display:inline-block" alt="World Vision">
@@ -298,7 +298,7 @@ tr:hover td{background:var(--card)}
         <label style="font-size:12px;font-weight:700;color:var(--muted)">비밀번호</label>
         <input id="login-pw" type="password" placeholder="비밀번호 입력" style="width:100%;margin-top:5px;padding:11px 14px;border:2px solid var(--border);border-radius:10px;font-size:15px;outline:none" onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter')doLogin()">
       </div>
-      <button onclick="doLogin()" id="btn-do-login" style="width:100%;background:var(--kakao);color:var(--on-primary);border:none;border-radius:12px;padding:14px;font-size:16px;font-weight:800;cursor:pointer">로그인</button>
+      <button onclick="doLogin()" id="btn-do-login" style="width:100%;background:var(--kakao);color:var(--on-primary);border:none;border-radius:999px;padding:14px;font-size:16px;font-weight:800;cursor:pointer">로그인</button>
       <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:14px">처음 오셨나요? <a href="#" onclick="switchTab('register');return false" style="color:var(--kakao);font-weight:700">회원가입</a></p>
     </div>
     <div id="form-register" style="display:none">
@@ -318,7 +318,7 @@ tr:hover td{background:var(--card)}
         <label style="font-size:12px;font-weight:700;color:var(--muted)">비밀번호 확인 *</label>
         <input id="reg-pw2" type="password" placeholder="비밀번호 재입력" style="width:100%;margin-top:5px;padding:11px 14px;border:2px solid var(--border);border-radius:10px;font-size:15px;outline:none" onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter')doRegister()">
       </div>
-      <button onclick="doRegister()" id="btn-do-register" style="width:100%;background:var(--kakao);color:var(--on-primary);border:none;border-radius:12px;padding:14px;font-size:16px;font-weight:800;cursor:pointer">계정 만들기</button>
+      <button onclick="doRegister()" id="btn-do-register" style="width:100%;background:var(--kakao);color:var(--on-primary);border:none;border-radius:999px;padding:14px;font-size:16px;font-weight:800;cursor:pointer">계정 만들기</button>
       <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:14px">이미 계정이 있으신가요? <a href="#" onclick="switchTab('login');return false" style="color:var(--kakao);font-weight:700">로그인</a></p>
     </div>
     <p id="login-err" style="color:var(--red);font-size:13px;text-align:center;margin-top:12px;display:none"></p>
@@ -551,11 +551,11 @@ tr:hover td{background:var(--card)}
   <span class="iv-name" id="iv-name"></span>
 </div>
 <div id="success-popup" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9100;display:none;align-items:center;justify-content:center">
-  <div style="background:var(--bg);border-radius:20px;padding:40px 36px;text-align:center;box-shadow:0 20px 60px rgba(32,21,21,.4);max-width:340px;width:90%">
+  <div style="background:var(--bg);border-radius:20px;padding:40px 36px;text-align:center;box-shadow:0 20px 60px rgba(34,37,42,.14);max-width:340px;width:90%">
     <div style="font-size:56px;margin-bottom:12px">✅</div>
     <h3 style="font-size:20px;font-weight:800;color:var(--brown);margin-bottom:8px">배부요청 완료!</h3>
     <p style="font-size:14px;color:var(--muted);line-height:1.6;margin-bottom:24px">신청되었습니다.<br>관리자 검토 후 이메일로 결과를 알려드립니다.</p>
-    <button onclick="closeSuccessPopup()" style="background:var(--kakao);color:var(--on-primary);border:none;border-radius:12px;padding:12px 32px;font-size:15px;font-weight:800;cursor:pointer">확인</button>
+    <button onclick="closeSuccessPopup()" style="background:var(--kakao);color:var(--on-primary);border:none;border-radius:999px;padding:12px 32px;font-size:15px;font-weight:800;cursor:pointer">확인</button>
   </div>
 </div>
 <div id="toast"></div>
@@ -1403,7 +1403,7 @@ function buildWarehouseMapPrintHtml(highlightZones) {
   const cell = (zone) => {
     if (!zone) return `<div></div>`;
     const hl = highlightZones && highlightZones.has(zone);
-    return `<div style="border:2px solid #201515;border-radius:8px;padding:10px 4px;text-align:center;background:${hl?'#FF6B1A':'#ffe8d1'};color:${hl?'#fff':'#201515'};font-weight:800;font-size:13px">${zone}</div>`;
+    return `<div style="border:2px solid #22252A;border-radius:8px;padding:10px 4px;text-align:center;background:${hl?'#FF6B1A':'#ffd9b8'};color:${hl?'#fff':'#22252A'};font-weight:800;font-size:13px">${zone}</div>`;
   };
   const pillar = `<div style="display:flex;align-items:center;justify-content:center;font-size:9px;color:#999;background:repeating-linear-gradient(45deg,#ddd,#ddd 3px,#eee 3px,#eee 6px);border-radius:4px">기둥</div>`;
   const colTemplate = '36px 1fr 20px 1fr 20px 1fr 20px 1fr';
@@ -1457,20 +1457,20 @@ function generatePickList() {
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>창고 피킹리스트 ${today}</title>
     <style>
-      body{font-family:'Inter','Apple SD Gothic Neo','Malgun Gothic',sans-serif;padding:32px;color:#201515;background:#fffefb}
+      body{font-family:'Inter','Apple SD Gothic Neo','Malgun Gothic',sans-serif;padding:32px;color:#22252A;background:#FFFFFF}
       h1{font-size:20px;margin:0 0 4px}
-      h2{font-size:16px;margin:32px 0 10px;border-top:2px solid #201515;padding-top:20px}
-      .sub{color:#939084;font-size:13px;margin-bottom:20px}
-      .muted{color:#939084;font-weight:400;font-size:12px}
+      h2{font-size:16px;margin:32px 0 10px;border-top:2px solid #22252A;padding-top:20px}
+      .sub{color:#767676;font-size:13px;margin-bottom:20px}
+      .muted{color:#767676;font-weight:400;font-size:12px}
       table{width:100%;border-collapse:collapse}
-      th,td{border:1px solid #e3ddd0;padding:9px 12px;font-size:14px;text-align:left}
-      th{background:#201515;color:#ff4f00}
+      th,td{border:1px solid #EEE9E2;padding:9px 12px;font-size:14px;text-align:left}
+      th{background:#22252A;color:#F4761F}
       td.qty{text-align:right;font-weight:700}
       td.zone{font-weight:700;color:#B8390C}
       .person-block{margin-bottom:22px;page-break-inside:avoid}
       .person-head{margin-bottom:8px;font-size:14px}
-      .map-wrap{margin-top:14px;padding:16px;border:1.5px solid #e3ddd0;border-radius:12px;page-break-inside:avoid}
-      .print-btn{margin-top:24px;padding:10px 22px;background:#ff4f00;color:#fffefb;border:none;border-radius:12px;font-weight:700;font-size:14px;cursor:pointer}
+      .map-wrap{margin-top:14px;padding:16px;border:1.5px solid #EEE9E2;border-radius:12px;page-break-inside:avoid}
+      .print-btn{margin-top:24px;padding:10px 22px;background:#F4761F;color:#FFFFFF;border:none;border-radius:999px;font-weight:700;font-size:14px;cursor:pointer}
       @page { size: A4; margin: 16mm 14mm; }
       @media print { .print-btn{display:none} }
     </style></head><body>
@@ -2062,7 +2062,7 @@ async function loadFeedback() {
     wrap.style.display = '';
     const stars = n => '★'.repeat(n) + '☆'.repeat(5-n);
     list.innerHTML = res.feedbacks.map(f => `
-      <div style="background:var(--bg);border-radius:10px;padding:14px 16px;margin-bottom:10px;box-shadow:0 1px 6px rgba(32,21,21,.06)">
+      <div style="background:var(--bg);border-radius:10px;padding:14px 16px;margin-bottom:10px;box-shadow:0 1px 6px rgba(34,37,42,.06)">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
           <div>
             <span style="color:var(--kakao);font-size:16px">${stars(f.rating)}</span>
