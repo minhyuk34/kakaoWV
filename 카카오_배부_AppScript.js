@@ -3116,12 +3116,14 @@ function sendResultReportRequestEmail(t, variant) {
         </ol>
       </div>
       <p>양식이 처음이시면 이 메일에 첨부된 샘플 파일(배분리스트, 결과보고양식)을 참고해서 작성하시면 됩니다.</p>
+      <p>전반적인 GIK 행정 및 결과보고 프로세스가 궁금하시면 아래 안내 페이지를 참고해주세요.<br>
+      <a href="https://gik-partner-crm-production.up.railway.app/gik-guide.html">📄 행정 및 결과보고 프로세스 안내</a></p>
       <p style="color:#888; font-size:12px; margin-top:20px">${footer}</p>
     </div>
   `;
   MailApp.sendEmail({
     to: t.email,
-    subject: `[카카오프렌즈 GIK] "${t.reason || '신청'}" 건 결과보고 등록 ${isReminder ? '요청' : '안내'}`,
+    subject: '[카카오프렌즈 GIK] 행정 및 결과보고 프로세스 안내',
     htmlBody: html,
     attachments: [docBlob, listBlob]
   });
