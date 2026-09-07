@@ -300,6 +300,7 @@ tr:hover td{background:var(--card)}
       </div>
       <button onclick="doLogin()" id="btn-do-login" style="width:100%;background:var(--kakao);color:var(--on-primary);border:none;border-radius:999px;padding:14px;font-size:16px;font-weight:800;cursor:pointer">로그인</button>
       <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:14px">처음 오셨나요? <a href="#" onclick="switchTab('register');return false" style="color:var(--kakao);font-weight:700">회원가입</a></p>
+      <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:6px"><a href="#" onclick="showFindAccountModal();return false" style="color:var(--muted);text-decoration:underline">아이디/비밀번호 찾기</a></p>
     </div>
     <div id="form-register" style="display:none">
       <div style="margin-bottom:12px">
@@ -693,6 +694,100 @@ function switchTab(t) {
   document.getElementById('tab-register').style.background = isLogin ? 'transparent' : 'var(--kakao)';
   document.getElementById('tab-register').style.color      = isLogin ? 'var(--muted)' : 'var(--on-primary)';
   document.getElementById('login-err').style.display = 'none';
+}
+// ── 아이디/비밀번호 찾기 ──
+// 로그인 아이디가 곧 "이름"이라 계정 자체를 잊는 경우는 드물지만, 이메일로
+// 등록된 이름을 다시 확인할 수 있게 한다. 비밀번호는 해시라 복구가 불가능해서
+// 이메일로 재설정 링크를 보내는 방식으로 처리한다(링크는 30분간 유효).
+function showFindAccountModal() {
+  document.getElementById('modal-title').textContent = '🔍 아이디/비밀번호 찾기';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--border)">
+      <p style="font-size:13px;font-weight:700;margin-bottom:8px">아이디(이름) 찾기</p>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:8px">가입할 때 입력한 이메일을 입력하면 등록된 이름을 알려드립니다.</p>
+      <div style="display:flex;gap:6px">
+        <input id="find-id-email" type="email" placeholder="가입 시 등록한 이메일" style="flex:1;padding:9px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none" onkeydown="if(event.key==='Enter')submitFindId()">
+        <button onclick="submitFindId()" style="padding:9px 16px;border:none;border-radius:8px;background:var(--kakao);color:var(--on-primary);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">찾기</button>
+      </div>
+      <p id="find-id-result" style="font-size:13px;margin-top:10px;display:none"></p>
+    </div>
+    <div>
+      <p style="font-size:13px;font-weight:700;margin-bottom:8px">비밀번호 재설정</p>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:8px">이름과 가입 이메일을 입력하면 재설정 링크를 이메일로 보내드립니다.</p>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <input id="find-pw-name" type="text" placeholder="이름" style="padding:9px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none">
+        <div style="display:flex;gap:6px">
+          <input id="find-pw-email" type="email" placeholder="가입 시 등록한 이메일" style="flex:1;padding:9px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none" onkeydown="if(event.key==='Enter')submitRequestReset()">
+          <button onclick="submitRequestReset()" style="padding:9px 16px;border:none;border-radius:8px;background:var(--kakao);color:var(--on-primary);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">재설정 메일 발송</button>
+        </div>
+      </div>
+      <p id="find-pw-result" style="font-size:13px;margin-top:10px;display:none"></p>
+    </div>`;
+  document.getElementById('modal-confirm').style.display = 'none';
+  document.getElementById('modal-overlay').classList.add('open');
+}
+async function submitFindId() {
+  const email = document.getElementById('find-id-email').value.trim();
+  const resultEl = document.getElementById('find-id-result');
+  if (!email) { return; }
+  try {
+    const res = await api('findAccountByEmail', { email });
+    resultEl.style.display = 'block';
+    if (!res.ok) { resultEl.style.color = 'var(--red)'; resultEl.textContent = res.error; return; }
+    resultEl.style.color = 'var(--green)';
+    resultEl.textContent = `등록된 이름: ${res.names.join(', ')}`;
+  } catch (e) { toast('❌ 서버 오류: ' + e.message); }
+}
+async function submitRequestReset() {
+  const name = document.getElementById('find-pw-name').value.trim();
+  const email = document.getElementById('find-pw-email').value.trim();
+  const resultEl = document.getElementById('find-pw-result');
+  if (!name || !email) { return; }
+  try {
+    const res = await api('requestPasswordReset', { name, email });
+    resultEl.style.display = 'block';
+    if (!res.ok) { resultEl.style.color = 'var(--red)'; resultEl.textContent = res.error; return; }
+    resultEl.style.color = 'var(--green)';
+    resultEl.textContent = '이메일로 재설정 링크를 보냈습니다. (30분 이내 유효)';
+  } catch (e) { toast('❌ 서버 오류: ' + e.message); }
+}
+// 재설정 링크(?resetToken=...)로 들어왔을 때 로그인 화면 위에 새 비밀번호 설정 모달을 띄운다.
+function showResetPasswordScreen(token) {
+  document.getElementById('modal-title').textContent = '🔑 새 비밀번호 설정';
+  document.getElementById('modal-body').innerHTML = `
+    <p style="margin-bottom:14px;font-size:13px;color:var(--muted)">새로 사용할 비밀번호를 입력해주세요.</p>
+    <div style="margin-bottom:10px">
+      <label style="font-size:12px;font-weight:700;color:var(--muted)">새 비밀번호 (6자 이상)</label>
+      <input id="reset-pw" type="password" placeholder="새 비밀번호" style="width:100%;margin-top:5px;padding:10px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none">
+    </div>
+    <div>
+      <label style="font-size:12px;font-weight:700;color:var(--muted)">새 비밀번호 확인</label>
+      <input id="reset-pw2" type="password" placeholder="비밀번호 재입력" style="width:100%;margin-top:5px;padding:10px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none" onkeydown="if(event.key==='Enter')submitResetPassword('${token}')">
+    </div>
+    <p id="reset-pw-err" style="color:var(--red);font-size:12px;margin-top:8px;display:none"></p>`;
+  document.getElementById('modal-confirm').style.display = '';
+  document.getElementById('modal-confirm').textContent = '비밀번호 변경';
+  document.getElementById('modal-confirm').onclick = () => submitResetPassword(token);
+  document.querySelector('.btn-cancel').style.display = 'none';
+  document.getElementById('modal-overlay').classList.add('open');
+}
+async function submitResetPassword(token) {
+  const pw = document.getElementById('reset-pw').value;
+  const pw2 = document.getElementById('reset-pw2').value;
+  const errEl = document.getElementById('reset-pw-err');
+  const showErr = (msg) => { errEl.textContent = msg; errEl.style.display = 'block'; };
+  errEl.style.display = 'none';
+  if (pw.length < 6) { showErr('비밀번호는 6자 이상이어야 합니다.'); return; }
+  if (pw !== pw2) { showErr('비밀번호가 일치하지 않습니다.'); return; }
+  try {
+    const hash = await sha256(pw);
+    const res = await api('resetPasswordWithToken', { token, hash });
+    if (!res.ok) { showErr(res.error); return; }
+    document.querySelector('.btn-cancel').style.display = '';
+    closeModal();
+    history.replaceState(null, '', location.pathname); // 새로고침해도 재설정 화면이 다시 뜨지 않도록
+    toast('✅ 비밀번호가 변경되었습니다. 새 비밀번호로 로그인해주세요.');
+  } catch (e) { showErr('서버 오류: ' + e.message); }
 }
 async function doRegister() {
   const name=document.getElementById('reg-name').value.trim();
@@ -2122,6 +2217,7 @@ async function rejectCancelItem(id, idx) {
 function closeModal() {
   document.getElementById('modal-overlay').classList.remove('open');
   document.querySelector('.btn-cancel').style.display = '';
+  document.getElementById('modal-confirm').style.display = '';
 }
 function openImgViewer(num, name) {
   document.getElementById('iv-img').src = 'images/' + num + '.jpg';
@@ -2733,8 +2829,14 @@ function toast(msg) {
 
 // ── INIT ──
 document.querySelectorAll('.page').forEach(p=>p.style.display='none');
-const _saved=sessionStorage.getItem('currentUser');
-if (_saved) { enterSystem(JSON.parse(_saved)); }
+const _resetToken = new URLSearchParams(location.search).get('resetToken');
+if (_resetToken) {
+  // 비밀번호 재설정 링크로 들어온 경우 — 자동로그인보다 우선해서 재설정 화면부터 띄운다.
+  showResetPasswordScreen(_resetToken);
+} else {
+  const _saved=sessionStorage.getItem('currentUser');
+  if (_saved) { enterSystem(JSON.parse(_saved)); }
+}
 </script>
 </body>
 </html>

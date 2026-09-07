@@ -9,6 +9,7 @@ const SHEET_REQ  = '신청';
 const SHEET_STK  = '재고';
 const SHEET_ZONE = '창고구역'; // 창고지도: 제품번호 → 구역(예: A_가) 매핑
 const ADMIN_EMAIL = 'minhyuk_jang@worldvision.or.kr';
+const APP_URL = 'https://minhyuk34.github.io/kakaoWV/'; // 비밀번호 재설정 링크 등에 사용
 
 // ── 결과보고 샘플 파일 (base64, 메일 첨부용) ──
 const SAMPLE_REPORT_DOC_B64 = [
@@ -1077,6 +1078,9 @@ function doPost(e) {
     const { action } = data;
     if      (action === 'register')      result = register(data);
     else if (action === 'login')         result = login(data);
+    else if (action === 'findAccountByEmail')     result = findAccountByEmail(data);
+    else if (action === 'requestPasswordReset')   result = requestPasswordReset(data);
+    else if (action === 'resetPasswordWithToken') result = resetPasswordWithToken(data);
     else if (action === 'submitRequest') result = submitRequest(data);
     else if (action === 'mergeIntoRequest') result = mergeIntoRequest(data);
     else if (action === 'mergeRequests')    result = mergeRequests(data);
@@ -1157,6 +1161,81 @@ function login({ name, hash }) {
   if (!acc) return { ok: false, error: `"${name}" 계정이 없습니다. 회원가입을 먼저 해주세요.` };
   if (acc[1] !== hash) return { ok: false, error: '비밀번호가 올바르지 않습니다.' };
   return { ok: true, name: acc[0], role: acc[2], email: acc[3] || '' };
+}
+
+// ── 아이디(이름) 찾기 ────────────────────────────────────────
+// 로그인 아이디가 곧 "이름"이라 계정 자체를 잊는 경우는 드물지만, 이메일로
+// 등록된 이름을 다시 확인할 수 있게 한다. 내부 직원 전용 도구라 계정 존재
+// 여부를 굳이 숨기지 않고(다른 액션들도 마찬가지) 바로 알려준다.
+function findAccountByEmail({ email }) {
+  if (!email) return { ok: false, error: '이메일을 입력해주세요.' };
+  const rows = sheet(SHEET_ACCT).getDataRange().getValues().slice(1);
+  const wanted = String(email).trim().toLowerCase();
+  const names = rows
+    .filter(r => String(r[3] || '').trim().toLowerCase() === wanted)
+    .map(r => r[0]);
+  if (names.length === 0) return { ok: false, error: '해당 이메일로 가입된 계정을 찾을 수 없습니다.' };
+  return { ok: true, names };
+}
+
+// ── 비밀번호 재설정 요청 ───────────────────────────────────────
+// 비밀번호는 해시로만 저장돼 있어 복구가 불가능하므로, 이름+이메일이
+// 일치하면 계정 시트에 임시 토큰(30분 유효)을 발급해 재설정 링크를 메일로
+// 보낸다. 토큰/만료시각은 계정 시트의 6·7번째 열에 그때그때 채워 넣는다
+// (헤더 재정의 없이도 기존 시트에 바로 쓸 수 있게 — dispatchMemo 열과 동일한 방식).
+function requestPasswordReset({ name, email }) {
+  if (!name || !email) return { ok: false, error: '이름과 이메일을 입력해주세요.' };
+  const s = sheet(SHEET_ACCT);
+  const rows = s.getDataRange().getValues();
+  const wantedEmail = String(email).trim().toLowerCase();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] !== name) continue;
+    if (String(rows[i][3] || '').trim().toLowerCase() !== wantedEmail) continue;
+
+    const token = Utilities.getUuid();
+    const expiresAt = Date.now() + 30 * 60 * 1000; // 30분
+    s.getRange(i + 1, 6).setValue(token);
+    s.getRange(i + 1, 7).setValue(String(expiresAt));
+
+    const resetUrl = `${APP_URL}?resetToken=${encodeURIComponent(token)}`;
+    MailApp.sendEmail({
+      to: email,
+      subject: '[카카오프렌즈 GIK] 비밀번호 재설정 안내',
+      htmlBody: `
+        <div style="font-family:sans-serif; line-height:1.7">
+          <h2>🔑 비밀번호 재설정</h2>
+          <p>안녕하세요, ${name}님.<br>아래 링크를 눌러 새 비밀번호를 설정해주세요. (30분 이내에만 유효합니다)</p>
+          <p><a href="${resetUrl}">${resetUrl}</a></p>
+          <p style="color:#888; font-size:12px; margin-top:20px">본인이 요청하지 않았다면 이 메일은 무시해주셔도 됩니다.</p>
+        </div>
+      `
+    });
+    return { ok: true };
+  }
+  return { ok: false, error: '이름과 이메일이 일치하는 계정을 찾을 수 없습니다.' };
+}
+
+// ── 비밀번호 재설정 실행(토큰 검증) ───────────────────────────
+function resetPasswordWithToken({ token, hash }) {
+  if (!token || !hash) return { ok: false, error: '잘못된 요청입니다.' };
+  const s = sheet(SHEET_ACCT);
+  const rows = s.getDataRange().getValues();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][5] || '') !== token) continue;
+
+    const expiresAt = Number(rows[i][6] || 0);
+    if (!expiresAt || Date.now() > expiresAt) {
+      return { ok: false, error: '재설정 링크가 만료되었습니다. 다시 요청해주세요.' };
+    }
+
+    s.getRange(i + 1, 2).setValue(hash); // 비밀번호해시
+    s.getRange(i + 1, 6).setValue('');   // 토큰 소진(재사용 방지)
+    s.getRange(i + 1, 7).setValue('');
+    return { ok: true, name: rows[i][0] };
+  }
+  return { ok: false, error: '유효하지 않은 재설정 링크입니다.' };
 }
 
 // ── 신청 제출 (신청 즉시 재고 차감) ──────────────────────────
