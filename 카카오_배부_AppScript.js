@@ -3,7 +3,7 @@
 //  붙여넣을 곳: script.google.com → 새 프로젝트
 // ============================================================
 
-const SHEET_ID   = 'YOUR_SPREADSHEET_ID'; // ← 스프레드시트 ID
+const SHEET_ID   = '12xx_3fs2EV3_6tpyukJmfhJBE_5-EPVkJ7-XiIvgdZc'; // ← 스프레드시트 ID
 const SHEET_ACCT = '계정';
 const SHEET_REQ  = '신청';
 const SHEET_STK  = '재고';

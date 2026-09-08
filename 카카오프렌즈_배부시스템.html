@@ -1754,9 +1754,20 @@ const HISTORY_CATEGORY_LABEL = {
 };
 // 기본은 배부완료/결과보고완료만 노출 — 취소/반려는 필터를 켜야 보임
 let adminHistoryFilters = new Set(['distributed', 'reported']);
+let adminHistorySearchName = '';
 function toggleHistoryFilter(cat) {
   if (adminHistoryFilters.has(cat)) adminHistoryFilters.delete(cat);
   else adminHistoryFilters.add(cat);
+  renderAdminHistory();
+}
+function setAdminHistorySearch(val) {
+  adminHistorySearchName = val.trim();
+  renderAdminHistory();
+}
+function resetAdminHistorySearch() {
+  adminHistorySearchName = '';
+  const nameEl = document.getElementById('admin-history-search-name');
+  if (nameEl) nameEl.value = '';
   renderAdminHistory();
 }
 function renderAdminHistory() {
@@ -1764,8 +1775,28 @@ function renderAdminHistory() {
   const counts = { distributed:0, reported:0, cancelled:0, rejected:0 };
   all.forEach(r => { const c = historyCategory(r); if (c) counts[c]++; });
 
-  const reqs = all.filter(r => adminHistoryFilters.has(historyCategory(r)));
+  let reqs = all.filter(r => adminHistoryFilters.has(historyCategory(r)));
+  if (adminHistorySearchName) reqs = reqs.filter(r => (r.name||'').includes(adminHistorySearchName));
+
   const el=document.getElementById('admin-history');
+
+  // 검색창은 최초 1번만 그린다 — 매번 다시 그리면(이름 입력의 oninput마다) DOM이
+  // 통째로 교체되면서 포커스가 끊겨 한 글자 치고 나면 커서가 빠져버린다(한글 조합 입력도 깨짐).
+  if (!document.getElementById('admin-history-search-bar')) {
+    el.innerHTML = `
+    <div id="admin-history-search-bar" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;background:var(--card);border-radius:8px;padding:10px 12px">
+      <input id="admin-history-search-name" type="text" placeholder="🔍 이름으로 검색"
+        oninput="setAdminHistorySearch(this.value)"
+        style="flex:1;min-width:140px;padding:7px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;outline:none">
+      <button id="admin-history-search-reset" onclick="resetAdminHistorySearch()" style="display:none;padding:6px 12px;border:1.5px solid var(--border);border-radius:6px;background:#fff;color:var(--muted);font-size:12px;cursor:pointer;white-space:nowrap">✕ 초기화</button>
+    </div>
+    <div id="admin-history-results"></div>`;
+  }
+  const resetBtn = document.getElementById('admin-history-search-reset');
+  if (resetBtn) resetBtn.style.display = adminHistorySearchName ? '' : 'none';
+
+  const resultsEl = document.getElementById('admin-history-results');
+  if (!resultsEl) return;
 
   const filterBar = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
     ${Object.keys(HISTORY_CATEGORY_LABEL).map(cat => {
@@ -1774,10 +1805,10 @@ function renderAdminHistory() {
     }).join('')}
   </div>`;
 
-  if (all.length===0){el.innerHTML=filterBar+'<div class="empty"><div class="emoji">📦</div><p>배부/반려/취소 이력이 없습니다</p></div>';return;}
-  if (reqs.length===0){el.innerHTML=filterBar+'<div class="empty"><div class="emoji">🔍</div><p>선택된 필터에 해당하는 이력이 없습니다</p></div>';return;}
+  if (all.length===0){resultsEl.innerHTML=filterBar+'<div class="empty"><div class="emoji">📦</div><p>배부/반려/취소 이력이 없습니다</p></div>';return;}
+  if (reqs.length===0){resultsEl.innerHTML=filterBar+'<div class="empty"><div class="emoji">🔍</div><p>검색/필터 조건에 맞는 이력이 없습니다</p></div>';return;}
 
-  el.innerHTML=filterBar+`<table><thead><tr><th>처리 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>신청내역</th><th>실제배부내역</th><th>상태</th></tr></thead>
+  resultsEl.innerHTML=filterBar+`<table><thead><tr><th>처리 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>신청내역</th><th>실제배부내역</th><th>상태</th></tr></thead>
   <tbody>${reqs.map(r=>{
     const active = r.items.filter(i=>!i.cancelled);
     const reqQty = active.reduce((s,i)=>s+i.qty,0);
