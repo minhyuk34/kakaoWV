@@ -1090,6 +1090,7 @@ function doPost(e) {
     else if (action === 'saveDispatchMemo')  result = saveDispatchMemo(data);
     else if (action === 'getStock')      result = getStock();
     else if (action === 'updateStock')   result = updateStock(data);
+    else if (action === 'setProductBlocked') result = setProductBlocked(data);
     else if (action === 'getProductZones') result = getProductZones();
     else if (action === 'setProductZone')  result = setProductZone(data);
     else if (action === 'syncStock')       result = syncStock();
@@ -1254,14 +1255,25 @@ function submitRequest({ dept, team, name, contact, email, reason, pickupDate, u
 function submitRequest_({ dept, team, name, contact, email, reason, pickupDate, useDate, items }) {
   // ── 재고 사전 검증 (서버에서 실시간 확인) ──────────────────
   const stockResult = getStock();
+  const blocked = [];
   const insufficient = [];
   items.forEach(item => {
     const num       = String(item.num).padStart(3, '0');
     const available = stockResult.stock[num]?.current ?? stockResult.stock[num] ?? 0;
+    if (stockResult.stock[num]?.blocked) {
+      blocked.push(item.name);
+      return;
+    }
     if (item.qty > available) {
       insufficient.push(`${item.name} (신청 ${item.qty}개 / 잔여 ${available}개)`);
     }
   });
+  if (blocked.length > 0) {
+    return {
+      ok: false,
+      error: '관리자에 의해 신청이 일시 중지된 품목이 포함되어 있습니다:\n' + blocked.join(', ')
+    };
+  }
   if (insufficient.length > 0) {
     return {
       ok: false,
@@ -1558,9 +1570,27 @@ function getStock() {
     const num = String(r[0]).padStart(3, '0');
     const current  = Number(r[2]) || 0;
     const original = Number(r[3]) || current; // D열 없으면 C열을 원래재고로
-    stock[num] = { current, original };
+    const blocked  = String(r[5] || '').trim() === 'Y'; // F열: 신청차단(현장재고 불일치 등으로 관리자가 임시 차단)
+    stock[num] = { current, original, blocked };
   });
   return { ok: true, stock };
+}
+
+// ── 품목별 신청 차단/해제 (관리자) ────────────────────────────
+// 현장재고와 신청재고가 안 맞을 때, 확인될 때까지 해당 품목의 신규 신청만
+// 막는다. 이미 제출된 신청이나 관리자의 "신청 외 물품 추가 지급"에는
+// 영향을 주지 않는다 — 관리자는 실제 상황을 알고 하는 조치이므로.
+function setProductBlocked({ num, blocked }) {
+  const s = sheet(SHEET_STK);
+  const rows = s.getDataRange().getValues();
+  const paddedNum = String(num).padStart(3, '0');
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).padStart(3, '0') === paddedNum) {
+      s.getRange(i + 1, 6).setValue(blocked ? 'Y' : '');
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: '제품을 찾을 수 없습니다.' };
 }
 
 // ── 재고 수정 (관리자 직접 수정) ──────────────────────────────
@@ -1897,14 +1927,22 @@ function createDeferredRequest({ dept, team, name, contact, email, reason, origi
 // 수취예정일·사용예정일이 같은 기존 신청에 새 항목들을 합쳐 넣는다.
 function mergeIntoRequest({ existingId, items }) {
   const stockResult = getStock();
+  const blocked = [];
   const insufficient = [];
   items.forEach(item => {
     const num = String(item.num).padStart(3, '0');
     const available = stockResult.stock[num]?.current ?? 0;
+    if (stockResult.stock[num]?.blocked) {
+      blocked.push(item.name);
+      return;
+    }
     if (item.qty > available) {
       insufficient.push(`${item.name} (신청 ${item.qty}개 / 잔여 ${available}개)`);
     }
   });
+  if (blocked.length > 0) {
+    return { ok: false, error: '관리자에 의해 신청이 일시 중지된 품목이 포함되어 있습니다:\n' + blocked.join(', ') };
+  }
   if (insufficient.length > 0) {
     return { ok: false, error: '재고 부족으로 합칠 수 없습니다:\n' + insufficient.join('\n') };
   }

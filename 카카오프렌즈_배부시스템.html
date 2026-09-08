@@ -637,6 +637,7 @@ let reqCache = [];
 
 function getStock(num)         { return stockCache[num]?.current  ?? 0; }
 function getOriginalStock(num) { return stockCache[num]?.original ?? getStock(num); }
+function isBlocked(num)        { return !!stockCache[num]?.blocked; }
 
 async function loadStockFromAPI() {
   try {
@@ -1027,6 +1028,7 @@ function cardHTML(p) {
     const stock=getStock(p.num);
     const inCart=cart[p.num]||0;
     const avail=stock-inCart;
+    const blocked=isBlocked(p.num);
     return `<div class="product-card">
       <div class="prod-img-wrap" onclick="openImgViewer('${p.num}','${p.name}')"><img src="images/${p.num}.jpg" class="prod-img" alt="${p.name}" loading="lazy" onerror="this.parentElement.outerHTML='&lt;div class=&quot;prod-img-wrap no-img&quot;&gt;🐾&lt;/div&gt;'"></div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
@@ -1037,9 +1039,10 @@ function cardHTML(p) {
       ${p.price_num ? `<div style="font-size:15px;font-weight:800;color:var(--brown);margin-top:2px">${p.price}</div>` : ''}
       <div class="stock-info ${stock<100?'low':''}">재고 ${stock.toLocaleString()}개${inCart>0?` (담음: ${inCart})`:'' }</div>
       <div class="progress-bar"><div class="progress-fill ${stock<100?'low':''}" style="width:${Math.max(0,Math.min(stock/1000*100,100))}%"></div></div>
+      ${blocked?`<div style="margin-top:8px;font-size:12px;font-weight:700;color:var(--red);background:#FEE9E7;border-radius:6px;padding:5px 8px">🚫 현재 재고 확인 중이라 신청이 일시 중지된 품목입니다</div>`:''}
       <div class="qty-row">
-        <input class="qty-input" id="qty-${p.num}" value="1" min="1" max="${avail}" type="number" placeholder="수량">
-        <button class="add-btn" onclick="addToCartFromCard('${p.num}')" ${avail<=0?'disabled':''}>${avail<=0?'품절':'담기'}</button>
+        <input class="qty-input" id="qty-${p.num}" value="1" min="1" max="${avail}" type="number" placeholder="수량" ${blocked?'disabled':''}>
+        <button class="add-btn" onclick="addToCartFromCard('${p.num}')" ${(avail<=0||blocked)?'disabled':''}>${blocked?'신청 중지':avail<=0?'품절':'담기'}</button>
       </div>
     </div>`;
 }
@@ -1630,13 +1633,20 @@ function renderAdminInventory() {
     const distCell = distributed>0
       ? `<a href="#" onclick="showStockDetail('${p.num}','distributed');return false" style="color:var(--blue);text-decoration:underline;cursor:pointer">${distributed.toLocaleString()}개</a>`
       : `${distributed.toLocaleString()}개`;
-    return `<tr>
+    const blocked = isBlocked(p.num);
+    return `<tr${blocked?' style="background:#FEE9E7"':''}>
       <td>${p.num}</td><td>${p.name}</td>
       <td>${original.toLocaleString()}개</td>
       <td>${reqCell}</td>
       <td>${distCell}</td>
       <td><span style="font-weight:700;color:${current<100?'var(--red)':'var(--green)'}">${current.toLocaleString()}개</span>
         <div class="progress-bar" style="width:100px;margin-top:4px"><div class="progress-fill ${current<100?'low':''}" style="width:${Math.max(0,Math.min(current/1000*100,100))}%"></div></div>
+      </td>
+      <td>
+        ${blocked
+          ? `<button onclick="toggleProductBlocked('${p.num}',false)" style="padding:5px 10px;border:none;border-radius:6px;background:var(--red);color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">🚫 차단됨 · 해제</button>`
+          : `<button onclick="toggleProductBlocked('${p.num}',true)" style="padding:5px 10px;border:1.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">신청 차단</button>`
+        }
       </td>
     </tr>`;
   }).join('');
@@ -1657,6 +1667,7 @@ function renderAdminInventory() {
     <th style="${thStyle}">신청재고</th>
     <th style="${thStyle}">배부재고</th>
     <th style="${thStyle}">현재재고</th>
+    <th style="${thStyle}">신청 관리</th>
   </tr></thead>
   <tbody>${rows}
   <tr style="font-weight:700;background:var(--tag-bg)">
@@ -1665,9 +1676,21 @@ function renderAdminInventory() {
     <td>${totalRequested.toLocaleString()}개</td>
     <td>${totalDistributed.toLocaleString()}개</td>
     <td>${totalCurrent.toLocaleString()}개</td>
+    <td></td>
   </tr>
   </tbody></table>
   </div>`;
+}
+// 현장재고와 시스템상 신청재고가 안 맞을 때, 확인될 때까지 해당 품목의
+// 신규 신청(장바구니 담기)만 임시로 막는다 — 이미 배부완료된 건에는 영향 없음.
+async function toggleProductBlocked(num, blocked) {
+  try {
+    const res = await api('setProductBlocked', { num, blocked });
+    if (!res.ok) { toast('❌ 변경 실패: ' + res.error); return; }
+    if (stockCache[num]) stockCache[num].blocked = blocked;
+    toast(blocked ? '🚫 신청이 차단되었습니다' : '✅ 차단이 해제되었습니다');
+    renderAdminInventory();
+  } catch (e) { toast('❌ 서버 오류: ' + e.message); }
 }
 // 재고관리 표의 신청재고/배부재고 숫자를 클릭하면 누가·언제·몇 개인지 팝업으로 보여줌
 function showStockDetail(num, kind) {
