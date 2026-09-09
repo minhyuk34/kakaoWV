@@ -2250,8 +2250,13 @@ function returnDistributedQty({ id, idx, returnQty, adminName }) {
 }
 
 // ── 배부완료 후 실배부수량 직접 수정(오기입 정정) ──────────────
-// distributedQty는 표시/집계용 필드일 뿐 재고는 신청 시점에 이미 차감되어 있으므로
-// (반품과 달리) 재고를 건드리지 않고 값만 신청수량(qty) 이내로 바로 고쳐 쓴다.
+// distributedQty는 표시/집계용 필드지만, 신청수량(qty)을 "초과"하는 부분은
+// 신청 시점에 예약(차감)된 적이 없는 물량이라 재고에서 별도로 차감해야 한다 —
+// distributeItems()의 초과배부 처리(adjustStockAllowNegative)와 동일한 원리다.
+// 예) 신청 1400개 중 실제로는 1560개가 나간 경우, 신청수량만큼은 이미 차감돼
+// 있으므로 초과분 160개만 추가로 차감한다(재고가 0 밑으로 내려가도 그대로 —
+// 그게 바로 초과배부를 진단할 수 있게 해주는 부분). 이 정정을 여러 번 반복해도
+// 중복 차감되지 않도록, "이전 초과분"과 "새 초과분"의 차이만큼만 조정한다.
 function editDistributedQty({ id, idx, newQty, adminName }) {
   newQty = Number(newQty);
   if (isNaN(newQty) || newQty < 0) return { ok: false, error: '올바른 수량을 입력하세요.' };
@@ -2275,23 +2280,34 @@ function editDistributedQty({ id, idx, newQty, adminName }) {
       if (!items[idx]) return { ok: false, error: '항목을 찾을 수 없습니다.' };
       if (!items[idx].distributed) return { ok: false, error: '아직 배부되지 않은 항목입니다.' };
 
-      const maxQty = Number(items[idx].qty) || 0;
-      if (newQty > maxQty) return { ok: false, error: `신청수량(${maxQty}개)을 초과할 수 없습니다.` };
-
+      const reqQty      = Number(items[idx].qty) || 0;
       const productNum  = items[idx].num;
       const productName = items[idx].name;
       const oldQty = Number(items[idx].distributedQty ?? items[idx].qty) || 0;
-      items[idx].distributedQty = newQty;
 
+      const prevExcess = Math.max(0, oldQty - reqQty);
+      const newExcess  = Math.max(0, newQty - reqQty);
+      const stockDelta = newExcess - prevExcess; // 양수면 재고 추가 차감, 음수면 복구
+
+      let newStock = currentStockOf(productNum);
+      if (stockDelta !== 0) {
+        newStock = adjustStockAllowNegative(productNum, -stockDelta, {
+          reqId: id, name: rows[i][4],
+          reason: `실배부수량 정정(${adminName || '관리자'}): ${productName} ${oldQty}→${newQty}` + (newExcess > 0 ? ` (초과분 ${newExcess})` : '')
+        });
+      } else {
+        // 재고 변동이 없는 정정(신청수량 이내에서의 조정)도 정정 사실 자체는 이력에 남긴다.
+        logStockChange(
+          { reqId: id, name: rows[i][4], reason: `실배부수량 정정(${adminName || '관리자'}): ${productName} ${oldQty}→${newQty}` },
+          productNum, 0, newStock
+        );
+      }
+
+      items[idx].distributedQty = newQty;
       s.getRange(i + 1, itemsCol + 1).setValue(JSON.stringify(items));
       s.getRange(i + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
-      // 재고 변동은 없지만 정정 사실은 변경이력에 남긴다 (증감 0)
-      logStockChange(
-        { reqId: id, name: rows[i][4], reason: `실배부수량 정정(${adminName || '관리자'}): ${productName} ${oldQty}→${newQty}` },
-        productNum, 0, currentStockOf(productNum)
-      );
 
-      return { ok: true, oldQty, newQty };
+      return { ok: true, oldQty, newQty, newStock, stockWarning: newStock !== null && newStock <= 0 };
     }
     return { ok: false, error: '신청을 찾을 수 없습니다.' };
   } finally {

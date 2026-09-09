@@ -2274,19 +2274,26 @@ async function returnItem(id, idx, maxQty, itemName) {
     showDetail(id); renderAdmin(); updateStats();
   } catch(e) { toast('❌ 서버 오류: ' + e.message); }
 }
-async function editDistQty(id, idx, currentQty, maxQty, itemName) {
-  const input = prompt(`"${itemName}" 실제 배부수량을 입력하세요 (신청수량 ${maxQty}개 이내 · 재고에는 영향 없음)`, String(currentQty));
+async function editDistQty(id, idx, currentQty, reqQty, itemName) {
+  // 신청수량(reqQty)을 초과해서 입력해도 된다 — 실제로 더 많이 나간 경우를 그대로
+  // 기록하기 위함. 신청수량 이내 조정은 재고에 영향 없고, 초과분은 재고에서 추가로
+  // 차감된다(이미 초과였다가 줄이면 그만큼 복구). 자세한 건 서버 쪽 주석 참고.
+  const input = prompt(`"${itemName}" 실제 배부수량을 입력하세요 (신청수량 참고: ${reqQty}개 · 이를 초과하면 초과분만큼 재고에서 추가로 차감됩니다)`, String(currentQty));
   if (input === null) return;
   const qty = parseInt(input, 10);
-  if (isNaN(qty) || qty < 0 || qty > maxQty) { toast(`❌ 올바른 수량을 입력하세요 (0~${maxQty})`); return; }
+  if (isNaN(qty) || qty < 0) { toast('❌ 올바른 수량을 입력하세요 (0 이상)'); return; }
   if (qty === currentQty) return;
-  if (!confirm(`"${itemName}" 실배부수량을 ${currentQty}개 → ${qty}개로 정정합니다.\n(재고 수량에는 영향을 주지 않습니다)`)) return;
+  const excessNote = qty > reqQty ? `\n⚠️ 신청수량(${reqQty}개)을 초과합니다 — 초과분 ${qty - reqQty}개는 재고에서 추가로 차감됩니다.` : '';
+  if (!confirm(`"${itemName}" 실배부수량을 ${currentQty}개 → ${qty}개로 정정합니다.${excessNote}`)) return;
 
   try {
     const res = await api('editDistributedQty', { id, idx, newQty: qty, adminName: currentUser?.name || '' });
     if (!res.ok) { toast('❌ 수정 실패: ' + res.error); return; }
-    await loadRequestsFromAPI();
+    await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
     toast(`✏️ 실배부수량 정정 완료 (${res.oldQty} → ${res.newQty})`);
+    if (res.stockWarning) {
+      alert(`⚠️ "${itemName}" 재고가 ${res.newStock}개(으)로 떨어졌습니다. 재고 상태를 확인해주세요.`);
+    }
     showDetail(id); renderAdmin(); updateStats();
   } catch(e) { toast('❌ 서버 오류: ' + e.message); }
 }
