@@ -1175,8 +1175,9 @@ function renderMyRequests() {
         <div><span style="color:var(--muted)">사용예정일</span> <b>${dateOnly(r.useDate)||'-'}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--muted)">사용처</span> <b>${r.reason||'-'}</b></div>
       </div>
-      ${r.adminNote?`<div style="font-size:12px;background:#FFF3CD;padding:6px 10px;border-radius:6px;margin-bottom:10px">💬 관리자: ${r.adminNote}</div>`:''}
-      ${r.status==='distributed'?`<div style="margin-bottom:10px"><button onclick="showReportUpload('${r.id}')" style="background:var(--blue);color:#fff;border:none;border-radius:7px;padding:7px 16px;font-size:13px;font-weight:700;cursor:pointer">📎 결과보고서 등록</button></div>`:''}
+      ${(()=>{ const {otherNote}=parseReportLinks(r.adminNote); return otherNote?`<div style="font-size:12px;background:#FFF3CD;padding:6px 10px;border-radius:6px;margin-bottom:10px">💬 관리자: ${otherNote}</div>`:''; })()}
+      ${hasReportSubmitted(r)?`<div style="margin-bottom:10px"><p style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">📂 등록된 결과보고 파일</p>${reportLinksHtml(r.adminNote,{boxed:true,fontSize:'13px'})}</div>`:''}
+      ${r.status==='distributed'?`<div style="margin-bottom:10px"><button onclick="showReportUpload('${r.id}')" style="background:var(--blue);color:#fff;border:none;border-radius:7px;padding:7px 16px;font-size:13px;font-weight:700;cursor:pointer">📎 결과보고서 ${hasReportSubmitted(r)?'수정':'등록'}</button></div>`:''}
       <table style="font-size:13px;width:100%"><thead><tr><th>제품명</th><th>수량</th><th>배부처 기록</th><th>배부수</th><th>남은개수</th></tr></thead>
       <tbody>${r.items.map((i,idx)=>{
         const isCancelled = i.cancelled||false;
@@ -1744,6 +1745,30 @@ function hasReportSubmitted(r) {
   const note = String(r.adminNote || '');
   return note.includes('보고서:') || note.includes('명단:');
 }
+// 관리자메모는 결과보고 링크(명단:/보고서:) 외에 반려사유·신청합치기 메모 등이
+// 줄바꿈으로 같이 쌓일 수 있어서, 링크만 따로 뽑아 클릭 가능한 형태로 보여줄 때 쓴다.
+function parseReportLinks(note) {
+  const lines = String(note || '').split('\n');
+  let listUrl = null, docUrl = null;
+  const otherLines = [];
+  lines.forEach(line => {
+    const l = line.trim();
+    if (l.startsWith('명단: '))       listUrl = l.slice('명단: '.length).trim();
+    else if (l.startsWith('보고서: ')) docUrl  = l.slice('보고서: '.length).trim();
+    else if (l) otherLines.push(l);
+  });
+  return { listUrl, docUrl, otherNote: otherLines.join('\n') };
+}
+function reportLinksHtml(note, opts) {
+  opts = opts || {};
+  const { listUrl, docUrl } = parseReportLinks(note);
+  if (!listUrl && !docUrl) return '';
+  const linkStyle = 'color:var(--blue);font-weight:700;text-decoration:none;white-space:nowrap';
+  return `<div style="${opts.boxed?'background:#E8F5E9;border-radius:6px;padding:6px 10px;':''}display:flex;gap:12px;font-size:${opts.fontSize||'12px'};margin-top:${opts.marginTop||'4px'}">
+    ${listUrl?`<a href="${listUrl}" target="_blank" rel="noopener" style="${linkStyle}">📋 배부명단</a>`:''}
+    ${docUrl?`<a href="${docUrl}" target="_blank" rel="noopener" style="${linkStyle}">📄 결과보고서</a>`:''}
+  </div>`;
+}
 function historyCategory(r) {
   if (r.status === 'distributed') return hasReportSubmitted(r) ? 'reported' : 'distributed';
   if (r.status === 'cancelled')   return 'cancelled';
@@ -1843,6 +1868,7 @@ function renderAdminHistory() {
     <td>
         <span class="status-badge ${r.status}">${cat==='reported'?'결과보고완료':statusLabel(r.status)}</span>
         ${r.status==='distributed'?`<br><button onclick="showReportUpload('${r.id}')" style="margin-top:4px;background:var(--blue);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">📎 결과보고${cat==='reported'?' 수정':''}</button>`:''}
+        ${cat==='reported'?reportLinksHtml(r.adminNote):''}
       </td>
   </tr>`;
   }).join('')}</tbody></table>`;
@@ -2844,9 +2870,15 @@ async function cancelItem(id, idx) {
 function showReportUpload(id) {
   const r = getRequests().find(x => String(x.id) === String(id));
   if (!r) return false;
+  const existingLinks = reportLinksHtml(r.adminNote, { boxed: true, fontSize: '13px', marginTop: '6px' });
   document.getElementById('modal-title').textContent = '📎 결과보고서 업로드';
   document.getElementById('modal-body').innerHTML = `
     <p style="font-size:13px;color:var(--muted);margin-bottom:16px">${r.name} (${r.team}) · ${r.reason}</p>
+    ${existingLinks?`<div style="margin-bottom:14px">
+      <p style="font-size:12px;font-weight:700;margin-bottom:4px">📂 이미 등록된 파일</p>
+      ${existingLinks}
+      <p style="font-size:11px;color:var(--muted);margin-top:6px">새 파일을 업로드하면 기존 파일은 그대로 두고 아래에 추가됩니다.</p>
+    </div>`:''}
     <div style="display:flex;flex-direction:column;gap:12px">
       <div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
