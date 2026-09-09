@@ -478,6 +478,7 @@ tr:hover td{background:var(--card)}
       <button class="tab active" onclick="adminTab('requests',this)">신청 관리</button>
       <button class="tab" onclick="adminTab('inventory',this)">재고 관리</button>
       <button class="tab" onclick="adminTab('history',this)">배부 이력</button>
+      <button class="tab" onclick="adminTab('audit',this)">⚠️ 재고 진단</button>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
       <span id="admin-last-update" style="font-size:12px;color:var(--muted)"></span>
@@ -490,6 +491,7 @@ tr:hover td{background:var(--card)}
   <div id="admin-requests"></div>
   <div id="admin-inventory" style="display:none"></div>
   <div id="admin-history" style="display:none"></div>
+  <div id="admin-audit" style="display:none"></div>
 </div>
 
 <!-- 피드백 -->
@@ -1316,6 +1318,7 @@ function renderAdmin() {
     <div class="dash-card blue"><div class="dc-label">배부 완료</div><div class="dc-val" style="color:var(--blue)">${distributed}</div><div style="font-size:12px;color:var(--muted)">처리 완료</div></div>`;
   if (currentAdminTab==='requests') renderAdminRequests();
   else if (currentAdminTab==='inventory') renderAdminInventory();
+  else if (currentAdminTab==='audit') renderAdminAudit();
   else renderAdminHistory();
 }
 function adminTab(t, el) {
@@ -1325,8 +1328,10 @@ function adminTab(t, el) {
   document.getElementById('admin-requests').style.display=t==='requests'?'':'none';
   document.getElementById('admin-inventory').style.display=t==='inventory'?'':'none';
   document.getElementById('admin-history').style.display=t==='history'?'':'none';
+  document.getElementById('admin-audit').style.display=t==='audit'?'':'none';
   if (t==='requests') renderAdminRequests();
   else if (t==='inventory') renderAdminInventory();
+  else if (t==='audit') renderAdminAudit();
   else renderAdminHistory();
 }
 // 서버에서 혹시 ISO 타임스탬프가 섞여 와도 화면에는 항상 연/월/일까지만 표기
@@ -1693,6 +1698,121 @@ async function toggleProductBlocked(num, blocked) {
     toast(blocked ? '🚫 신청이 차단되었습니다' : '✅ 차단이 해제되었습니다');
     renderAdminInventory();
   } catch (e) { toast('❌ 서버 오류: ' + e.message); }
+}
+// ── 재고 진단(웹) ────────────────────────────────────────────
+// Apps Script 메뉴의 generateAuditSheets()와 같은 로직을 클라이언트에 이미
+// 로드된 reqCache/stockCache로 그대로 계산한다 — 구글시트를 안 열어도
+// 관리자페이지에서 바로 확인할 수 있게. 서버에 새 API를 만들 필요가 없다.
+// (단, 시스템을 거치지 않고 현장에서 직접 건넨 물품은 기록 자체가 없어
+// 여기서도 잡히지 않는다 — 그건 실물 재고 실사로만 확인 가능하다)
+function computeStockAudit() {
+  const distTotalByNum = {};
+  const adminAddedRows = [];
+  const pendingItemsByNum = {};
+
+  getRequests().forEach(r => {
+    if (r.status === 'cancelled' || r.status === 'rejected') return;
+    (r.items || []).forEach(item => {
+      if (item.cancelled) return;
+      const num = String(item.num).padStart(3, '0');
+
+      if (item.distributed) {
+        const dq = Number(item.distributedQty ?? item.qty) || 0;
+        distTotalByNum[num] = (distTotalByNum[num] || 0) + dq;
+      }
+
+      if (item.adminAdded) {
+        adminAddedRows.push({
+          reqId: r.id, createdAt: r.createdAt, name: r.name, dept: r.dept, team: r.team,
+          contact: r.contact, itemName: item.name, num, qty: item.qty,
+          distributeDate: item.distributeDate || ''
+        });
+      }
+
+      if (!item.distributed && (r.status === 'pending' || r.status === 'approved')) {
+        if (!pendingItemsByNum[num]) pendingItemsByNum[num] = [];
+        pendingItemsByNum[num].push({
+          reqId: r.id, createdAt: r.createdAt, name: r.name, dept: r.dept, team: r.team,
+          contact: r.contact, qty: item.qty, itemName: item.name
+        });
+      }
+    });
+  });
+
+  const problemProducts = [];
+  PRODUCTS.forEach(p => {
+    const original = getOriginalStock(p.num);
+    const distTotal = distTotalByNum[p.num] || 0;
+    const distRemaining = original - distTotal;
+    if (distRemaining < 0) problemProducts.push({ num: p.num, name: p.name, original, distTotal, distRemaining });
+  });
+  problemProducts.sort((a,b) => a.distRemaining - b.distRemaining);
+
+  const riskRows = [];
+  problemProducts.forEach(pp => {
+    (pendingItemsByNum[pp.num] || []).forEach(p => {
+      riskRows.push({ ...p, distRemaining: pp.distRemaining, productName: pp.name });
+    });
+  });
+  riskRows.sort((a,b) => a.distRemaining - b.distRemaining);
+
+  return { problemProducts, adminAddedRows, riskRows };
+}
+function renderAdminAudit() {
+  const el = document.getElementById('admin-audit');
+  const { problemProducts, adminAddedRows, riskRows } = computeStockAudit();
+
+  const problemSection = problemProducts.length === 0
+    ? `<div class="empty"><div class="emoji">✅</div><p>실배부 기준으로 재고가 부족한 품목이 없습니다.</p></div>`
+    : `<table><thead><tr><th>제품번호</th><th>제품명</th><th>총재고</th><th>실제배부합계</th><th>실배부 기준 잔여재고</th></tr></thead>
+      <tbody>${problemProducts.map(pp=>`<tr>
+        <td>${pp.num}</td><td>${pp.name}</td><td>${pp.original.toLocaleString()}개</td>
+        <td>${pp.distTotal.toLocaleString()}개</td>
+        <td style="font-weight:700;color:var(--red)">${pp.distRemaining.toLocaleString()}개</td>
+      </tr>`).join('')}</tbody></table>`;
+
+  const riskSection = riskRows.length === 0
+    ? `<div class="empty"><div class="emoji">✅</div><p>재고 부족으로 영향받는 미배부 신청이 없습니다.</p></div>`
+    : `<table><thead><tr><th>제품명</th><th>부족수량</th><th>신청시각</th><th>이름</th><th>본부/팀</th><th>연락처</th><th>신청수량</th></tr></thead>
+      <tbody>${riskRows.map(r=>`<tr>
+        <td>${r.productName}</td>
+        <td style="font-weight:700;color:var(--red)">${r.distRemaining.toLocaleString()}개</td>
+        <td style="font-size:12px">${r.createdAt}</td>
+        <td><a href="#" onclick="showDetail('${r.reqId}');return false" style="color:var(--blue)"><b>${r.name||'-'}</b></a></td>
+        <td>${r.dept||'-'}<br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
+        <td style="font-size:12px">${r.contact||'-'}</td>
+        <td>${r.qty.toLocaleString()}개</td>
+      </tr>`).join('')}</tbody></table>`;
+
+  const adminAddedSection = adminAddedRows.length === 0
+    ? `<div class="empty"><div class="emoji">📋</div><p>신청 외 추가 지급 내역이 없습니다.</p></div>`
+    : `<table><thead><tr><th>신청시각</th><th>이름</th><th>본부/팀</th><th>연락처</th><th>제품명</th><th>수량</th><th>지급일</th></tr></thead>
+      <tbody>${adminAddedRows.map(r=>`<tr>
+        <td style="font-size:12px">${r.createdAt}</td>
+        <td><a href="#" onclick="showDetail('${r.reqId}');return false" style="color:var(--blue)"><b>${r.name||'-'}</b></a></td>
+        <td>${r.dept||'-'}<br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
+        <td style="font-size:12px">${r.contact||'-'}</td>
+        <td>${r.itemName}</td>
+        <td>${r.qty.toLocaleString()}개</td>
+        <td style="font-size:12px">${r.distributeDate||'-'}</td>
+      </tr>`).join('')}</tbody></table>`;
+
+  el.innerHTML = `
+    <p style="margin-bottom:16px;font-size:12px;color:var(--muted);background:var(--card);border-radius:8px;padding:10px 12px">
+      현장재고와 시스템상 신청재고가 안 맞을 때 원인을 찾기 위한 화면입니다. 시스템을 거치지 않고 현장에서 직접 건넨 물품은 기록 자체가 없어 여기서도 잡히지 않습니다 — 그런 경우는 실물 재고 실사로 확인해주세요.
+    </p>
+    <div style="margin-bottom:24px">
+      <div class="section-header"><h2 style="font-size:15px">⚠️ 재고 부족(초과배부) 품목 ${problemProducts.length>0?`(${problemProducts.length})`:''}</h2></div>
+      ${problemSection}
+    </div>
+    <div style="margin-bottom:24px">
+      <div class="section-header"><h2 style="font-size:15px">🚨 재고부족으로 못 받을 수 있는 신청 ${riskRows.length>0?`(${riskRows.length})`:''}</h2></div>
+      ${riskSection}
+    </div>
+    <div>
+      <div class="section-header"><h2 style="font-size:15px">📋 관리자 추가지급 내역(신청 없이 지급된 건) ${adminAddedRows.length>0?`(${adminAddedRows.length})`:''}</h2></div>
+      ${adminAddedSection}
+    </div>`;
 }
 // 재고관리 표의 신청재고/배부재고 숫자를 클릭하면 누가·언제·몇 개인지 팝업으로 보여줌
 function showStockDetail(num, kind) {
