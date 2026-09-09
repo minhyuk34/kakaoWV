@@ -952,6 +952,7 @@ function onOpen() {
     .createMenu('배부현황')
     .addItem('지금 새로고침', 'generateReport')
     .addItem('재고만 강제 재계산(리포트 갱신 없이)', 'forceSyncStockFromMenu')
+    .addItem('재고 불일치 진단 시트 생성(추가지급내역/재고부족위험신청)', 'generateAuditSheets')
     .addSeparator()
     .addItem('수취예정 리마인더 지금 발송', 'sendUpcomingPickupReminder')
     .addItem('수취예정 리마인더 매주 월요일 자동발송 등록', 'setupWeeklyPickupReminderTrigger')
@@ -3011,8 +3012,11 @@ function generateReport() {
   const colKeys = Array.from(colKeySet).sort();
   const totalCols = colKeys.length;
 
-  // 헤더 행: [제품번호, 제품명, 총재고, 팀1(신청), 팀2(신청), ..., 신청합계, 실제배부합계, 잔여재고]
-  const headerRow = ['제품번호', '제품명', '총재고', ...colKeys, '신청합계', '실제배부합계', '잔여재고'];
+  // 헤더 행: [제품번호, 제품명, 총재고, 팀1(신청), 팀2(신청), ..., 신청합계, 실제배부합계, 잔여재고, 실배부 기준 잔여재고]
+  // 마지막 "실배부 기준 잔여재고"는 (총재고 - 실제배부합계)를 0 밑으로 클램프하지 않고 그대로 보여준다.
+  // 현장재고와 시스템상 신청재고가 안 맞을 때, 신청 기준 잔여재고(항상 0 이상으로 보정됨)만 봐서는
+  // "실제로 얼마나 초과 배부됐는지"가 안 보였던 문제 — 이 열이 음수로 뜨는 제품이 바로 그 원인이다.
+  const headerRow = ['제품번호', '제품명', '총재고', ...colKeys, '신청합계', '실제배부합계', '잔여재고', '실배부 기준 잔여재고'];
   report.appendRow(headerRow);
 
   // 헤더 스타일
@@ -3024,8 +3028,8 @@ function generateReport() {
 
   // 총재고 열 헤더 색상 구분
   report.getRange(1, 3).setBackground('#5C3D3D').setFontColor('#FFFFFF');
-  // 신청합계/실제배부합계/잔여재고 열 헤더 색상 구분
-  report.getRange(1, headerRow.length - 2, 1, 3).setBackground('#5C3D3D').setFontColor('#FFFFFF');
+  // 신청합계/실제배부합계/잔여재고/실배부 기준 잔여재고 열 헤더 색상 구분
+  report.getRange(1, headerRow.length - 3, 1, 4).setBackground('#5C3D3D').setFontColor('#FFFFFF');
 
   // 재고 시트의 전체 제품을 기준으로 rowKeys 구성 (신청 없는 제품도 포함)
   const allProductKeys = sheet(SHEET_STK).getDataRange().getValues().slice(1)
@@ -3062,13 +3066,17 @@ function generateReport() {
     // (역산 방식은 반품·관리자 수동조정 등 신청수량과 별개로 일어나는 재고 변동을
     // 전혀 반영하지 못해 관리자페이지 재고와 계속 어긋났었음)
     const remaining = stock.current;
+    // 실배부 기준 잔여재고 = 총재고 - 실제배부합계, 0 밑으로 클램프하지 않는다.
+    // 신청 기준(remaining)은 항상 0 이상으로 보정되어 있어 실제로 초과 배부된
+    // 제품을 찾아낼 수 없었는데, 이 값은 음수 그대로 남겨서 바로 눈에 띄게 한다.
+    const distRemaining = original - distTotal;
 
     grandOriginal += original;
     grandRequested += rowTotal;
     grandDistributedActual += distTotal;
     grandCurrent += remaining;
 
-    dataRows.push([num, name, original, ...qtys, rowTotal, distTotal, remaining]);
+    dataRows.push([num, name, original, ...qtys, rowTotal, distTotal, remaining, distRemaining]);
   });
 
   if (dataRows.length > 0) {
@@ -3076,33 +3084,39 @@ function generateReport() {
 
     // 데이터 영역 줄무늬 — 행마다 개별 API 호출하지 않고 배경색 2차원 배열을 한 번에 적용
     // (144개 행이면 개별 호출 144번 vs 일괄 호출 1번 — 체감 속도 차이가 큼)
-    const remCol      = headerRow.length;
     const reqTotalCol = 3 + totalCols + 1;   // 신청합계
     const distCol     = reqTotalCol + 1;     // 실제배부합계
+    const remCol      = distCol + 1;         // 잔여재고
+    const distRemCol  = remCol + 1;          // 실배부 기준 잔여재고 (= headerRow.length)
     const bgGrid = dataRows.map((row, i) => {
       const stripe = i % 2 === 0 ? '#FFFFFF' : '#FFF9E6';
       const rowBg = new Array(headerRow.length).fill(stripe);
       rowBg[2] = '#F0F0F0';   // 총재고 열
       rowBg[reqTotalCol - 1] = '#FEE500'; // 신청합계 열
       rowBg[distCol - 1] = '#CCE5FF';     // 실제배부합계 열
-      rowBg[remCol - 1] = row[row.length - 1] <= 0 ? '#FFCDD2' : '#E8F5E9'; // 잔여재고 열
+      rowBg[remCol - 1] = row[remCol - 1] <= 0 ? '#FFCDD2' : '#E8F5E9';         // 잔여재고 열
+      rowBg[distRemCol - 1] = row[distRemCol - 1] < 0 ? '#FF8A80' : '#E8F5E9'; // 실배부 기준 잔여재고 열 (초과배부는 더 진하게)
       return rowBg;
     });
     report.getRange(2, 1, dataRows.length, headerRow.length).setBackgrounds(bgGrid);
 
-    // 굵게 표시할 열(총재고/신청합계/실제배부합계/잔여재고)
+    // 굵게 표시할 열(총재고/신청합계/실제배부합계/잔여재고/실배부 기준 잔여재고)
     report.getRange(2, 3, dataRows.length, 1).setFontWeight('bold');
     report.getRange(2, reqTotalCol, dataRows.length, 1).setFontWeight('bold');
     report.getRange(2, distCol, dataRows.length, 1).setFontWeight('bold');
     report.getRange(2, remCol, dataRows.length, 1).setFontWeight('bold');
+    report.getRange(2, distRemCol, dataRows.length, 1).setFontWeight('bold');
 
-    // 잔여재고 0 이하인 행만 글자색 빨간색으로 (배경은 위에서 이미 처리됨)
-    const remFontColors = dataRows.map(row => [row[row.length - 1] <= 0 ? '#C62828' : '#000000']);
+    // 잔여재고/실배부 기준 잔여재고가 0 이하(마이너스 포함)인 행만 글자색 빨간색으로
+    const remFontColors = dataRows.map(row => [row[remCol - 1] <= 0 ? '#C62828' : '#000000']);
     report.getRange(2, remCol, dataRows.length, 1).setFontColors(remFontColors);
+    const distRemFontColors = dataRows.map(row => [row[distRemCol - 1] < 0 ? '#B71C1C' : '#000000']);
+    report.getRange(2, distRemCol, dataRows.length, 1).setFontColors(distRemFontColors);
   }
 
   // 합계 행
-  const totalRow = ['', '합계', grandOriginal, ...colTotals, grandRequested, grandDistributedActual, grandCurrent];
+  const grandDistRemaining = grandOriginal - grandDistributedActual;
+  const totalRow = ['', '합계', grandOriginal, ...colTotals, grandRequested, grandDistributedActual, grandCurrent, grandDistRemaining];
   const totalRowIdx = dataRows.length + 2;
   report.appendRow(totalRow);
   report.getRange(totalRowIdx, 1, 1, headerRow.length)
@@ -3121,6 +3135,114 @@ function generateReport() {
   Logger.log(`배부현황 시트 생성 완료: 제품 ${rowKeys.length}종 / 팀 ${totalCols}개`);
   // 스프레드시트 메뉴에서 수동 실행한 경우에만 알림 표시 (웹앱에서 호출 시 UI 컨텍스트가 없어 예외 발생)
   try { SpreadsheetApp.getUi().alert(`배부현황 시트가 생성되었습니다.\n제품 ${rowKeys.length}종 × 팀 ${totalCols}개`); } catch (e) {}
+}
+
+// ── 재고 불일치 진단: 관리자 추가지급 내역 + 재고부족 위험 신청 ──────
+// "현장재고와 신청재고가 안 맞는다"는 문제를 진단하기 위한 시트 2개를 만든다.
+// (1) 관리자추가지급내역 — "신청 외 물품 추가 지급"(addAdminItem)으로 나간
+//     건은 전부 item.adminAdded=true로 표시되어 있어 여기서 모아볼 수 있다.
+//     단, 시스템을 아예 거치지 않고 현장에서 그냥 건네준 물품은 애초에
+//     기록 자체가 없어서 이 시트로도 잡아낼 수 없다 — 그런 경우는 실물
+//     재고 확인(현장 실사)으로만 확인 가능하다.
+// (2) 재고부족위험신청 — 실배부합계가 이미 총재고를 넘어선(=배부현황 시트의
+//     "실배부 기준 잔여재고"가 음수인) 제품에 대해, 아직 배부되지 않은
+//     (pending/approved) 신청이 남아있다면 그 신청자는 실제로 받기 어려울
+//     가능성이 높다는 뜻이라 목록으로 뽑아준다.
+function generateAuditSheets() {
+  try { syncStock(); } catch (e) { Logger.log('generateAuditSheets 내 syncStock 실패: ' + e.message); }
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  const stockMap = {};
+  sheet(SHEET_STK).getDataRange().getValues().slice(1).forEach(r => {
+    if (!r[0]) return;
+    const num = String(r[0]).padStart(3, '0');
+    const original = Number(r[3]) || Number(r[2]) || 0;
+    stockMap[num] = { original, name: String(r[1] || '') };
+  });
+
+  const reqRows = sheet(SHEET_REQ).getDataRange().getValues().slice(1);
+  const distTotalByNum = {};
+  const adminAddedRows = [];
+  const pendingItemsByNum = {}; // num -> [{reqId, createdAt, name, dept, team, contact, qty, itemName}]
+
+  reqRows.forEach(r => {
+    if (!r[0]) return;
+    const isOld    = String(r[8]).trim().startsWith('[') || String(r[8]).trim().startsWith('{');
+    const itemsCol = isOld ? 8 : 10;
+    const statusCol= isOld ? 10 : 12;
+    const status   = String(r[statusCol] || '');
+    if (status === 'cancelled' || status === 'rejected') return;
+
+    let items = [];
+    try { items = JSON.parse(r[itemsCol] || '[]'); } catch (e) {}
+
+    items.forEach(item => {
+      if (item.cancelled) return;
+      const num = String(item.num).padStart(3, '0');
+
+      if (item.distributed) {
+        const dq = Number(item.distributedQty ?? item.qty) || 0;
+        distTotalByNum[num] = (distTotalByNum[num] || 0) + dq;
+      }
+
+      if (item.adminAdded) {
+        adminAddedRows.push([
+          r[1], r[4], r[2], r[3], r[5], item.name, num, item.qty,
+          item.distributeDate || '', item.distributeMethod || ''
+        ]);
+      }
+
+      if (!item.distributed && (status === 'pending' || status === 'approved')) {
+        if (!pendingItemsByNum[num]) pendingItemsByNum[num] = [];
+        pendingItemsByNum[num].push({
+          reqId: r[0], createdAt: r[1], name: r[4], dept: r[2], team: r[3],
+          contact: r[5], qty: item.qty, itemName: item.name
+        });
+      }
+    });
+  });
+
+  // ---- 시트 1: 관리자 추가지급 내역 ----
+  let s1 = ss.getSheetByName('관리자추가지급내역');
+  if (s1) ss.deleteSheet(s1);
+  s1 = ss.insertSheet('관리자추가지급내역');
+  s1.appendRow(['신청일시', '이름', '본부', '팀', '연락처', '제품명', '제품번호', '수량', '지급일', '지급방법']);
+  s1.getRange(1, 1, 1, 10).setBackground('#3C1E1E').setFontColor('#FEE500').setFontWeight('bold');
+  if (adminAddedRows.length > 0) s1.getRange(2, 1, adminAddedRows.length, 10).setValues(adminAddedRows);
+  s1.setFrozenRows(1);
+  for (let c = 1; c <= 10; c++) s1.setColumnWidth(c, c === 6 ? 220 : 110);
+
+  // ---- 시트 2: 재고부족 위험 신청 ----
+  let s2 = ss.getSheetByName('재고부족위험신청');
+  if (s2) ss.deleteSheet(s2);
+  s2 = ss.insertSheet('재고부족위험신청');
+  s2.appendRow(['제품번호', '제품명', '실배부 기준 부족수량', '신청ID', '신청일시', '이름', '본부', '팀', '연락처', '신청수량']);
+  s2.getRange(1, 1, 1, 10).setBackground('#3C1E1E').setFontColor('#FEE500').setFontWeight('bold');
+
+  const riskRows = [];
+  Object.keys(pendingItemsByNum).forEach(num => {
+    const original = (stockMap[num] && stockMap[num].original) || 0;
+    const distTotal = distTotalByNum[num] || 0;
+    const distRemaining = original - distTotal;
+    if (distRemaining >= 0) return; // 이미 초과배부된 제품만 대상 — 아직 여유가 있으면 제외
+    pendingItemsByNum[num].forEach(p => {
+      riskRows.push([
+        num, (stockMap[num] && stockMap[num].name) || p.itemName, distRemaining,
+        p.reqId, p.createdAt, p.name, p.dept, p.team, p.contact, p.qty
+      ]);
+    });
+  });
+  if (riskRows.length > 0) {
+    riskRows.sort((a, b) => a[2] - b[2]); // 부족이 심한 제품부터
+    s2.getRange(2, 1, riskRows.length, 10).setValues(riskRows);
+    s2.getRange(2, 3, riskRows.length, 1).setFontColor('#C62828').setFontWeight('bold');
+  }
+  s2.setFrozenRows(1);
+  for (let c = 1; c <= 10; c++) s2.setColumnWidth(c, c === 2 ? 220 : 110);
+
+  const msg = `관리자추가지급내역 ${adminAddedRows.length}건, 재고부족위험신청 ${riskRows.length}건 생성 완료`;
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
 }
 
 // ── 수취예정일 한 달 이내 신청 건 관리자 메일 발송 ─────────────────
