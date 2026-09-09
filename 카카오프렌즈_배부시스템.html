@@ -1798,7 +1798,7 @@ function renderAdminAudit() {
       <tbody>${problemProducts.map(pp=>`<tr>
         <td>${pp.num}</td><td>${pp.name}</td><td>${pp.original.toLocaleString()}개</td>
         <td><a href="#" onclick="showStockDetail('${pp.num}','requested-all');return false" style="color:var(--blue);text-decoration:underline;cursor:pointer">${pp.requestedTotal.toLocaleString()}개</a></td>
-        <td>${pp.distTotal.toLocaleString()}개</td>
+        <td><a href="#" onclick="showStockDetail('${pp.num}','distributed');return false" style="color:var(--blue);text-decoration:underline;cursor:pointer">${pp.distTotal.toLocaleString()}개</a></td>
         <td>${pp.pendingTotal.toLocaleString()}개</td>
         <td style="font-weight:700;color:var(--red)">${pp.currentStock.toLocaleString()}개</td>
       </tr>`).join('')}</tbody></table>`;
