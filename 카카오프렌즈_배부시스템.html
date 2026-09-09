@@ -1869,6 +1869,7 @@ function showStockDetail(num, kind) {
         team: r.team || '-',
         date: kind === 'distributed' ? (item.distributeDate || r.updatedAt || r.createdAt) : r.createdAt,
         qty: kind === 'distributed' ? (item.distributedQty ?? item.qty) : item.qty,
+        reqQty: Number(item.qty) || 0, // 배부재고 상세에서 "신청수 대비 배부수"를 같이 보여주기 위함
         status: isDist ? '배부완료' : (r.status === 'approved' ? '승인' : '대기중')
       });
     });
@@ -1879,18 +1880,26 @@ function showStockDetail(num, kind) {
   const dateLabel = kind === 'distributed' ? '배부일' : '신청일시';
   const titleLabel = kind === 'distributed' ? '📦 배부재고' : (kind === 'requested-all' ? '📋 실제신청합계' : '📋 신청재고');
   const showStatusCol = kind === 'requested-all';
+  // 배부재고 상세는 "신청수"도 같이 보여줘서, 신청한 것보다 더 많이(또는 신청 없이)
+  // 배부된 건이 있는지 한눈에 비교할 수 있게 한다 — 배부수>신청수인 행은 빨간색으로 강조.
+  const showReqQtyCol = kind === 'distributed';
 
   document.getElementById('modal-title').textContent = `${titleLabel} 상세 — ${prod ? prod.name : num}`;
   document.getElementById('modal-body').innerHTML = list.length ? `
+    ${showReqQtyCol ? '<p style="font-size:11px;color:var(--muted);margin-bottom:8px">🔴 표시된 배부수는 그 사람이 신청한 수량보다 많이 배부된 경우입니다(신청 없이 받았거나, 신청보다 더 받은 경우).</p>' : ''}
     <table style="font-size:13px;width:100%">
-      <thead><tr><th>이름</th><th>본부/팀</th><th>${dateLabel}</th>${showStatusCol?'<th>상태</th>':''}<th style="text-align:right">수량</th></tr></thead>
-      <tbody>${list.map(e => `<tr>
+      <thead><tr><th>이름</th><th>본부/팀</th><th>${dateLabel}</th>${showStatusCol?'<th>상태</th>':''}${showReqQtyCol?'<th style="text-align:right">신청수</th>':''}<th style="text-align:right">${showReqQtyCol?'배부수':'수량'}</th></tr></thead>
+      <tbody>${list.map(e => {
+        const over = showReqQtyCol && (Number(e.qty)||0) > (Number(e.reqQty)||0);
+        return `<tr>
         <td>${e.name}</td>
         <td>${e.dept} / ${e.team}</td>
         <td>${dateOnly(e.date) || e.date || '-'}</td>
         ${showStatusCol?`<td>${e.status}</td>`:''}
-        <td style="text-align:right">${(Number(e.qty) || 0).toLocaleString()}개</td>
-      </tr>`).join('')}</tbody>
+        ${showReqQtyCol?`<td style="text-align:right">${(Number(e.reqQty)||0).toLocaleString()}개</td>`:''}
+        <td style="text-align:right;${over?'color:var(--red);font-weight:700':''}">${over?'🔴 ':''}${(Number(e.qty) || 0).toLocaleString()}개</td>
+      </tr>`;
+      }).join('')}</tbody>
     </table>
     <div style="text-align:right;margin-top:10px;font-weight:700">합계 ${total.toLocaleString()}개</div>
   ` : '<div class="empty"><div class="emoji">📭</div><p>내역이 없습니다</p></div>';
