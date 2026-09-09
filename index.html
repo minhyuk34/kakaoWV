@@ -1336,6 +1336,7 @@ function dateOnly(v) {
 }
 let adminReqSort = 'default';
 let selectedReqIds = new Set();
+let selectedHistoryIds = new Set(); // 배부이력 탭 전용 선택 상태(신청관리 탭과 별개)
 let adminReqSearchName   = '';
 let adminReqSearchPickup = '';
 let adminReqSearchUse    = '';
@@ -1770,6 +1771,21 @@ function resetAdminHistorySearch() {
   if (nameEl) nameEl.value = '';
   renderAdminHistory();
 }
+function toggleHistorySelect(id, checked) {
+  if (checked) selectedHistoryIds.add(String(id)); else selectedHistoryIds.delete(String(id));
+  updateHistoryMergeBtn();
+}
+function toggleSelectAllHistory(cb) {
+  document.querySelectorAll('.history-select-chk').forEach(el => {
+    el.checked = cb.checked;
+    if (cb.checked) selectedHistoryIds.add(el.dataset.id); else selectedHistoryIds.delete(el.dataset.id);
+  });
+  updateHistoryMergeBtn();
+}
+function updateHistoryMergeBtn() {
+  const btn = document.getElementById('history-merge-btn');
+  if (btn) btn.textContent = `🔗 선택 ${selectedHistoryIds.size}건 배부 합치기`;
+}
 function renderAdminHistory() {
   const all = getRequests().filter(r=>r.status==='distributed'||r.status==='rejected'||r.status==='cancelled');
   const counts = { distributed:0, reported:0, cancelled:0, rejected:0 };
@@ -1789,6 +1805,7 @@ function renderAdminHistory() {
         oninput="setAdminHistorySearch(this.value)"
         style="flex:1;min-width:140px;padding:7px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;outline:none">
       <button id="admin-history-search-reset" onclick="resetAdminHistorySearch()" style="display:none;padding:6px 12px;border:1.5px solid var(--border);border-radius:6px;background:#fff;color:var(--muted);font-size:12px;cursor:pointer;white-space:nowrap">✕ 초기화</button>
+      <button id="history-merge-btn" onclick="showMergeRequestsModal(selectedHistoryIds)" style="padding:7px 14px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">🔗 선택 0건 배부 합치기</button>
     </div>
     <div id="admin-history-results"></div>`;
   }
@@ -1808,7 +1825,7 @@ function renderAdminHistory() {
   if (all.length===0){resultsEl.innerHTML=filterBar+'<div class="empty"><div class="emoji">📦</div><p>배부/반려/취소 이력이 없습니다</p></div>';return;}
   if (reqs.length===0){resultsEl.innerHTML=filterBar+'<div class="empty"><div class="emoji">🔍</div><p>검색/필터 조건에 맞는 이력이 없습니다</p></div>';return;}
 
-  resultsEl.innerHTML=filterBar+`<table><thead><tr><th>처리 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>신청내역</th><th>실제배부내역</th><th>상태</th></tr></thead>
+  resultsEl.innerHTML=filterBar+`<table><thead><tr><th><input type="checkbox" onchange="toggleSelectAllHistory(this)" title="배부완료 건만 선택됨"></th><th>처리 시각</th><th>본부/팀</th><th>이름/연락처</th><th>사용처</th><th>신청내역</th><th>실제배부내역</th><th>상태</th></tr></thead>
   <tbody>${reqs.map(r=>{
     const active = r.items.filter(i=>!i.cancelled);
     const reqQty = active.reduce((s,i)=>s+i.qty,0);
@@ -1816,6 +1833,7 @@ function renderAdminHistory() {
     const distQty = distActive.reduce((s,i)=>s+(i.distributedQty ?? i.qty),0);
     const cat = historyCategory(r);
     return `<tr>
+    <td>${r.status==='distributed'?`<input type="checkbox" class="history-select-chk" data-id="${r.id}" ${selectedHistoryIds.has(String(r.id))?'checked':''} onchange="toggleHistorySelect('${r.id}',this.checked)">`:''}</td>
     <td style="font-size:12px">${r.updatedAt||r.createdAt}</td>
     <td><b>${r.dept||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
     <td><b>${r.name||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.contact||'-'}</span></td>
@@ -1828,6 +1846,7 @@ function renderAdminHistory() {
       </td>
   </tr>`;
   }).join('')}</tbody></table>`;
+  updateHistoryMergeBtn();
 }
 async function handleRequest(id, newStatus) {
   try {
@@ -1857,19 +1876,35 @@ function promptReject(id) {
 // 관리자가 신청관리에서 체크박스로 고른 여러 건을 하나로 합친다. 각 신청은
 // 접수 시점에 이미 재고가 차감돼 있으므로, 합치기는 재고를 다시 건드리지 않고
 // 물품목록만 기준 신청 하나로 모으는 순수 기록 정리다(백엔드 mergeRequests 참고).
-function showMergeRequestsModal() {
-  const all = getRequests().filter(r => selectedReqIds.has(String(r.id)));
-  const eligible = all.filter(r => r.status==='pending' || r.status==='approved');
-  const excluded = all.filter(r => !(r.status==='pending' || r.status==='approved'));
-  if (eligible.length < 2) {
-    toast('❌ 대기중/승인 상태인 신청을 2건 이상 선택해주세요.');
+function showMergeRequestsModal(idsSet) {
+  idsSet = idsSet || selectedReqIds;
+  const all = getRequests().filter(r => idsSet.has(String(r.id)));
+  const isPreDist = r => r.status==='pending' || r.status==='approved';
+  const isDist    = r => r.status==='distributed';
+  const preCount  = all.filter(isPreDist).length;
+  const distCount = all.filter(isDist).length;
+  if (preCount > 0 && distCount > 0) {
+    toast('❌ 대기중/승인 신청과 배부완료 신청은 함께 합칠 수 없습니다. 같은 상태끼리만 선택해주세요.');
     return;
   }
-  const itemSummary = r => r.items.filter(i=>!i.cancelled).map(i=>`${i.name} ${i.qty}개`).join(', ') || '(항목 없음)';
-  document.getElementById('modal-title').textContent = '🔗 신청 합치기';
+  const bucket = distCount > 0 ? 'distributed' : 'pre';
+  const eligible = bucket === 'distributed' ? all.filter(isDist) : all.filter(isPreDist);
+  const excluded = all.filter(r => !eligible.includes(r));
+  if (eligible.length < 2) {
+    toast(bucket === 'distributed' ? '❌ 배부완료 상태인 신청을 2건 이상 선택해주세요.' : '❌ 대기중/승인 상태인 신청을 2건 이상 선택해주세요.');
+    return;
+  }
+  const itemSummary = r => r.items.filter(i=>!i.cancelled).map(i=>{
+    if (bucket === 'distributed') return `${i.name} ${(i.distributedQty ?? i.qty).toLocaleString()}개`;
+    return `${i.name} ${i.qty}개`;
+  }).join(', ') || '(항목 없음)';
+  const introText = bucket === 'distributed'
+    ? '기준이 될 신청을 하나 선택하세요. 나머지 신청의 배부 물품이 기준 신청으로 합쳐지고, 나머지 신청은 취소 처리됩니다. (재고는 이미 각자 배부 시점에 차감되어 있어 추가로 차감되지 않고, 이미 등록된 결과보고 링크가 있다면 기준 신청의 메모로 그대로 옮겨집니다)'
+    : '기준이 될 신청을 하나 선택하세요. 나머지 신청의 물품이 기준 신청으로 합쳐지고, 나머지 신청은 취소 처리됩니다. (재고는 이미 차감되어 있어 추가로 차감되지 않습니다)';
+  document.getElementById('modal-title').textContent = bucket === 'distributed' ? '🔗 배부 합치기' : '🔗 신청 합치기';
   document.getElementById('modal-body').innerHTML = `
-    <p style="margin-bottom:10px;font-size:13px;color:var(--muted)">기준이 될 신청을 하나 선택하세요. 나머지 신청의 물품이 기준 신청으로 합쳐지고, 나머지 신청은 취소 처리됩니다. (재고는 이미 차감되어 있어 추가로 차감되지 않습니다)</p>
-    ${excluded.length ? `<p style="margin-bottom:10px;font-size:12px;color:var(--red)">⚠️ 이미 배부/취소/반려된 ${excluded.length}건은 대상에서 제외됩니다: ${excluded.map(r=>r.name).join(', ')}</p>` : ''}
+    <p style="margin-bottom:10px;font-size:13px;color:var(--muted)">${introText}</p>
+    ${excluded.length ? `<p style="margin-bottom:10px;font-size:12px;color:var(--red)">⚠️ 상태가 다른 ${excluded.length}건은 대상에서 제외됩니다: ${excluded.map(r=>r.name).join(', ')}</p>` : ''}
     <div style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto">
       ${eligible.map((r,i)=>`
         <label style="display:flex;gap:10px;align-items:flex-start;padding:10px;border:1.5px solid var(--border);border-radius:8px;cursor:pointer">
@@ -1892,8 +1927,9 @@ function showMergeRequestsModal() {
       const res = await api('mergeRequests', { targetId, sourceIds, adminName: currentUser.name });
       if (!res.ok) { toast('❌ 합치기 실패: '+res.error); return; }
       selectedReqIds.clear();
+      selectedHistoryIds.clear();
       await loadRequestsFromAPI();
-      closeModal(); toast('✅ 신청 합치기 완료'); renderAdmin();
+      closeModal(); toast('✅ 합치기 완료'); renderAdmin();
     } catch(e) { toast('❌ 서버 오류: '+e.message); }
   };
   document.getElementById('modal-overlay').classList.add('open');

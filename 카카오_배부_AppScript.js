@@ -1998,11 +1998,16 @@ function mergeIntoRequest({ existingId, items }) {
   }
 }
 
-// ── 관리자 - 이미 접수된 신청 여러 건을 기준 신청 하나로 합치기 ─────
+// ── 관리자 - 여러 신청 건을 기준 신청 하나로 합치기 ─────────────
 // submitRequest 시점에 각 신청의 재고가 이미 차감돼 있으므로, 여기서는
 // 재고를 다시 건드리지 않고 물품목록만 기준(target) 신청으로 모으는
 // 순수 기록 정리다. 나머지(source) 신청들은 cancelled로 표시하되,
 // cancelRequest()와 달리 재고를 복구하지 않는다(이미 target에 남아있으므로).
+//
+// 대기중/승인(사전) 신청끼리, 또는 배부완료 신청끼리만 합칠 수 있고 섞어서는
+// 안 된다 — "합쳐진 신청의 상태"가 애매해지기 때문. 배부완료 건을 합칠 때는
+// distributedQty·distLog(배부처 기록)까지 같이 합산/이관해야 실제 배부
+// 기록이 유실되지 않는다.
 function mergeRequests({ targetId, sourceIds, adminName }) {
   if (!targetId || !sourceIds || !sourceIds.length) {
     return { ok: false, error: '합칠 신청을 선택해주세요.' };
@@ -2021,19 +2026,23 @@ function mergeRequests({ targetId, sourceIds, adminName }) {
 
     const isOld = r => String(r[8]).trim().startsWith('[') || String(r[8]).trim().startsWith('{');
     const itemsCol = 10, totalQtyCol = 11, statusCol = 12, updatedCol = 13, noteCol = 14;
+    const PRE_STATUSES = ['pending', 'approved'];
 
     const targetIdx = rowIndexById[String(targetId)];
     if (targetIdx === undefined) return { ok: false, error: '기준 신청을 찾을 수 없습니다.' };
     if (isOld(rows[targetIdx])) return { ok: false, error: '구형 신청 건은 합칠 수 없습니다.' };
 
     const targetStatus = String(rows[targetIdx][statusCol] || '');
-    if (targetStatus !== 'pending' && targetStatus !== 'approved') {
-      return { ok: false, error: '기준 신청은 대기중이거나 승인된 상태여야 합칠 수 있습니다.' };
+    const isPreDistribution = PRE_STATUSES.includes(targetStatus);
+    const isDistributed = targetStatus === 'distributed';
+    if (!isPreDistribution && !isDistributed) {
+      return { ok: false, error: '기준 신청은 대기중·승인·배부완료 상태여야 합칠 수 있습니다.' };
     }
 
     let targetItems = [];
     try { targetItems = JSON.parse(rows[targetIdx][itemsCol] || '[]'); } catch (e) {}
-    if (targetItems.some(it => it.distributed)) {
+    // 대기중/승인인데 이미 일부 항목만 배부된(부분배부) 애매한 상태는 막는다.
+    if (isPreDistribution && targetItems.some(it => it.distributed)) {
       return { ok: false, error: '이미 일부 배부된 신청은 합칠 수 없습니다.' };
     }
 
@@ -2045,13 +2054,16 @@ function mergeRequests({ targetId, sourceIds, adminName }) {
       if (isOld(rows[idx])) return { ok: false, error: '구형 신청 건은 합칠 수 없습니다.' };
 
       const status = String(rows[idx][statusCol] || '');
-      if (status !== 'pending' && status !== 'approved') {
-        return { ok: false, error: `이미 배부/취소/반려된 신청(${rows[idx][4]})은 합칠 수 없습니다.` };
+      if (isPreDistribution && !PRE_STATUSES.includes(status)) {
+        return { ok: false, error: `대기중/승인 신청과는 같은 상태의 신청만 합칠 수 있습니다 (${rows[idx][4]}).` };
+      }
+      if (isDistributed && status !== 'distributed') {
+        return { ok: false, error: `배부완료 신청과는 배부완료 상태인 신청만 합칠 수 있습니다 (${rows[idx][4]}).` };
       }
 
       let items = [];
       try { items = JSON.parse(rows[idx][itemsCol] || '[]'); } catch (e) {}
-      if (items.some(it => it.distributed)) {
+      if (isPreDistribution && items.some(it => it.distributed)) {
         return { ok: false, error: `이미 일부 배부된 신청(${rows[idx][4]})은 합칠 수 없습니다.` };
       }
       sourceItemsById[sid] = items;
@@ -2065,17 +2077,31 @@ function mergeRequests({ targetId, sourceIds, adminName }) {
         );
         if (match) {
           match.qty = (Number(match.qty) || 0) + Number(newItem.qty);
+          if (isDistributed) {
+            // 배부완료 건을 합칠 때는 실제 배부수량·배부처 기록(distLog)까지 같이 합산해야
+            // "실제로 몇 개를 누구에게 줬는지"가 유실되지 않는다.
+            const matchDist = Number(match.distributedQty ?? match.qty) || 0;
+            const newDist   = Number(newItem.distributedQty ?? newItem.qty) || 0;
+            match.distributedQty = matchDist + newDist;
+            match.distributed = true;
+            if (!match.distributeDate && newItem.distributeDate) match.distributeDate = newItem.distributeDate;
+            if (newItem.distLog && newItem.distLog.length) {
+              match.distLog = (match.distLog || []).concat(newItem.distLog).slice(0, 10);
+            }
+          }
         } else {
-          targetItems.push({
-            num: newItem.num, name: newItem.name, qty: newItem.qty,
-            price: newItem.price || 0, detail: newItem.detail || ''
-          });
+          // 새 품목: 배부 관련 필드(distributed/distributedQty/distLog 등) 포함해서 그대로 옮긴다.
+          targetItems.push({ ...newItem });
         }
       });
 
       const idx = rowIndexById[sid];
       s.getRange(idx + 1, statusCol + 1).setValue('cancelled');
-      s.getRange(idx + 1, noteCol + 1).setValue(`⚑ ${adminName || '관리자'}가 신청 #${targetId}(으)로 합침`);
+      // 기존 관리자메모(결과보고 파일 링크 등)를 덮어쓰지 않고 뒤에 이어 붙인다 —
+      // 이미 결과보고를 등록한 배부완료 건을 합칠 때 그 링크가 사라지면 안 되므로.
+      const mergeNote = `⚑ ${adminName || '관리자'}가 신청 #${targetId}(으)로 합침`;
+      const existingNote = String(rows[idx][noteCol] || '');
+      s.getRange(idx + 1, noteCol + 1).setValue(existingNote ? existingNote + '\n' + mergeNote : mergeNote);
       s.getRange(idx + 1, updatedCol + 1).setValue(new Date().toLocaleString('ko-KR'));
     });
 
