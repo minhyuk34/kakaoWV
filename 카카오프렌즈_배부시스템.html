@@ -1749,7 +1749,13 @@ function computeStockAudit() {
     const original = getOriginalStock(p.num);
     const distTotal = distTotalByNum[p.num] || 0;
     const currentStock = getStock(p.num);
-    if (currentStock < 0) problemProducts.push({ num: p.num, name: p.name, original, distTotal, currentStock });
+    if (currentStock < 0) {
+      // 총재고-실제배부합계만 봐서는 숫자가 안 맞아 보인다 — 대기중/승인으로 아직
+      // 안 나간 예약분도 현재재고 계산에 포함되기 때문에, 그 예약분도 같이 보여줘야
+      // "총재고 - 실제배부합계 - 미배부예약 = 현재재고"가 눈으로 확인된다.
+      const pendingTotal = (pendingItemsByNum[p.num] || []).reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
+      problemProducts.push({ num: p.num, name: p.name, original, distTotal, pendingTotal, currentStock });
+    }
   });
   problemProducts.sort((a,b) => a.currentStock - b.currentStock);
 
@@ -1769,10 +1775,12 @@ function renderAdminAudit() {
 
   const problemSection = problemProducts.length === 0
     ? `<div class="empty"><div class="emoji">✅</div><p>현재재고가 마이너스인 품목이 없습니다.</p></div>`
-    : `<table><thead><tr><th>제품번호</th><th>제품명</th><th>총재고</th><th>실제배부합계</th><th>현재재고</th></tr></thead>
+    : `<p style="font-size:11px;color:var(--muted);margin-bottom:8px">현재재고 = 총재고 − 실제배부합계 − 미배부예약(대기중·승인)</p>
+      <table><thead><tr><th>제품번호</th><th>제품명</th><th>총재고</th><th>실제배부합계</th><th>미배부예약</th><th>현재재고</th></tr></thead>
       <tbody>${problemProducts.map(pp=>`<tr>
         <td>${pp.num}</td><td>${pp.name}</td><td>${pp.original.toLocaleString()}개</td>
         <td>${pp.distTotal.toLocaleString()}개</td>
+        <td>${pp.pendingTotal.toLocaleString()}개</td>
         <td style="font-weight:700;color:var(--red)">${pp.currentStock.toLocaleString()}개</td>
       </tr>`).join('')}</tbody></table>`;
 
