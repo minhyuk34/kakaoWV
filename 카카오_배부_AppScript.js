@@ -1696,10 +1696,13 @@ function syncStock() {
         items.forEach(item => {
           if (item.cancelled) return; // 취소된 항목 제외
           const n = String(item.num).padStart(3, '0');
-          // 반품된 수량은 재고로 이미 돌아왔으므로 사용량에서 빼야 한다.
-          // (안 그러면 반품처리 직후 자동 새로고침 때 syncStock이 반품 전 수량으로 재계산해 덮어써버림)
-          const returned = Number(item.returnedQty) || 0;
-          const net = Math.max(0, Number(item.qty) - returned);
+          // 이미 배부완료된 항목은 신청수량(qty)이 아니라 실제 배부수량(distributedQty)을
+          // 기준으로 삼는다 — distributedQty는 반품 시 이미 차감 반영되고, 관리자가
+          // 신청수량을 초과해 정정한 경우(초과배부)에도 실제로 나간 만큼 정확히 반영된
+          // 값이다. 예전에는 항상 qty만 써서, 초과배부 정정으로 재고에서 별도 차감한
+          // 부분이 재계산할 때마다 사라지고 신청수량 기준으로 되돌아가버렸다.
+          const base = item.distributed ? (item.distributedQty ?? item.qty) : item.qty;
+          const net = Math.max(0, Number(base) || 0);
           usedQty[n] = (usedQty[n] || 0) + net;
         });
       } catch(e) {}
@@ -1719,7 +1722,10 @@ function syncStock() {
     }
 
     const used    = usedQty[num] || 0;
-    const current = Math.max(0, original - used);
+    // 초과배부로 실제 나간 양이 총재고를 넘으면 0으로 가리지 않고 마이너스 그대로
+    // 남겨둔다 — 현장재고 불일치를 진단하려면(관리자페이지 "제품 목록"에도 그대로
+    // 노출됨) 이 값이 0으로 감춰지면 안 된다.
+    const current = original - used;
 
     s.getRange(i + 1, 3).setValue(current);  // C열: 잔여재고
     s.getRange(i + 1, 5).setValue(used);     // E열: 배분수량
