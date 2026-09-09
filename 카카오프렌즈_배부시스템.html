@@ -1706,15 +1706,18 @@ async function toggleProductBlocked(num, blocked) {
 // (단, 시스템을 거치지 않고 현장에서 직접 건넨 물품은 기록 자체가 없어
 // 여기서도 잡히지 않는다 — 그건 실물 재고 실사로만 확인 가능하다)
 function computeStockAudit() {
-  const distTotalByNum = {};
+  const distTotalByNum = {};      // 실제배부합계 — 배부완료 항목의 실제배부수량(distributedQty) 합
+  const requestedTotalByNum = {}; // 실제신청합계 — 배부여부 상관없이 신청수량(qty) 합(취소 제외)
   const adminAddedRows = [];
-  const pendingItemsByNum = {};
+  const pendingItemsByNum = {};   // 미배부예약 — 아직 배부 안 된 대기중/승인 항목만
 
   getRequests().forEach(r => {
     if (r.status === 'cancelled' || r.status === 'rejected') return;
     (r.items || []).forEach(item => {
       if (item.cancelled) return;
       const num = String(item.num).padStart(3, '0');
+
+      requestedTotalByNum[num] = (requestedTotalByNum[num] || 0) + (Number(item.qty) || 0);
 
       if (item.distributed) {
         const dq = Number(item.distributedQty ?? item.qty) || 0;
@@ -1747,6 +1750,7 @@ function computeStockAudit() {
   const problemProducts = [];
   PRODUCTS.forEach(p => {
     const original = getOriginalStock(p.num);
+    const requestedTotal = requestedTotalByNum[p.num] || 0;
     const distTotal = distTotalByNum[p.num] || 0;
     const currentStock = getStock(p.num);
     if (currentStock < 0) {
@@ -1754,18 +1758,28 @@ function computeStockAudit() {
       // 안 나간 예약분도 현재재고 계산에 포함되기 때문에, 그 예약분도 같이 보여줘야
       // "총재고 - 실제배부합계 - 미배부예약 = 현재재고"가 눈으로 확인된다.
       const pendingTotal = (pendingItemsByNum[p.num] || []).reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
-      problemProducts.push({ num: p.num, name: p.name, original, distTotal, pendingTotal, currentStock });
+      problemProducts.push({ num: p.num, name: p.name, original, requestedTotal, distTotal, pendingTotal, currentStock });
     }
   });
   problemProducts.sort((a,b) => a.currentStock - b.currentStock);
 
+  // 이 제품에서 얼마나 부족한지(shortage) 대비, 아직 못 받은 사람들 각각이 실제로
+  // 받을 수 있을지는 관리자가 우선순위를 정해야 알 수 있다 — 다만 "적어도 이만큼은
+  // 못 받는 사람이 생긴다"는 최소 보장치를, 신청이 빠른 사람부터 받는다고 가정하고
+  // (선입선출) 뒤에서부터 부족분을 채워나가는 방식으로 사람별 예상 부족수량을 매긴다.
   const riskRows = [];
   problemProducts.forEach(pp => {
-    (pendingItemsByNum[pp.num] || []).forEach(p => {
-      riskRows.push({ ...p, currentStock: pp.currentStock, productName: pp.name });
-    });
+    const list = (pendingItemsByNum[pp.num] || []).slice()
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); // 신청 빠른 순
+    let remainingShortage = Math.min(-pp.currentStock, pp.pendingTotal);
+    for (let i = list.length - 1; i >= 0; i--) {
+      const item = list[i];
+      const atRisk = Math.min(item.qty, remainingShortage);
+      remainingShortage -= atRisk;
+      riskRows.push({ ...item, atRiskQty: atRisk, currentStock: pp.currentStock, productName: pp.name });
+    }
   });
-  riskRows.sort((a,b) => a.currentStock - b.currentStock);
+  riskRows.sort((a,b) => b.atRiskQty - a.atRiskQty || a.currentStock - b.currentStock);
 
   return { problemProducts, adminAddedRows, riskRows };
 }
@@ -1775,26 +1789,34 @@ function renderAdminAudit() {
 
   const problemSection = problemProducts.length === 0
     ? `<div class="empty"><div class="emoji">✅</div><p>현재재고가 마이너스인 품목이 없습니다.</p></div>`
-    : `<p style="font-size:11px;color:var(--muted);margin-bottom:8px">현재재고 = 총재고 − 실제배부합계 − 미배부예약(대기중·승인)</p>
-      <table><thead><tr><th>제품번호</th><th>제품명</th><th>총재고</th><th>실제배부합계</th><th>미배부예약</th><th>현재재고</th></tr></thead>
+    : `<div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.7">
+        <div>· <b>실제신청합계</b>: 배부 여부와 상관없이 지금까지 이 제품을 신청한 전체 수량(취소 제외). 클릭하면 신청자 목록을 볼 수 있습니다.</div>
+        <div>· <b>미배부예약</b>: 신청이 승인됐거나 대기 중이지만 아직 실제로 배부(지급)는 안 된 수량. 아직 안 나갔지만 그만큼 재고를 미리 확보(예약)해둔 것으로 보고 현재재고 계산에 넣습니다.</div>
+        <div>· <b>현재재고</b> = 총재고 − 실제배부합계 − 미배부예약</div>
+      </div>
+      <table><thead><tr><th>제품번호</th><th>제품명</th><th>총재고</th><th>실제신청합계</th><th>실제배부합계</th><th>미배부예약</th><th>현재재고</th></tr></thead>
       <tbody>${problemProducts.map(pp=>`<tr>
         <td>${pp.num}</td><td>${pp.name}</td><td>${pp.original.toLocaleString()}개</td>
+        <td><a href="#" onclick="showStockDetail('${pp.num}','requested-all');return false" style="color:var(--blue);text-decoration:underline;cursor:pointer">${pp.requestedTotal.toLocaleString()}개</a></td>
         <td>${pp.distTotal.toLocaleString()}개</td>
         <td>${pp.pendingTotal.toLocaleString()}개</td>
         <td style="font-weight:700;color:var(--red)">${pp.currentStock.toLocaleString()}개</td>
       </tr>`).join('')}</tbody></table>`;
 
+  const riskTotalQty = riskRows.reduce((s,r)=>s+r.atRiskQty, 0);
   const riskSection = riskRows.length === 0
     ? `<div class="empty"><div class="emoji">✅</div><p>재고 부족으로 영향받는 미배부 신청이 없습니다.</p></div>`
-    : `<table><thead><tr><th>제품명</th><th>부족수량</th><th>신청시각</th><th>이름</th><th>본부/팀</th><th>연락처</th><th>신청수량</th></tr></thead>
+    : `<p style="font-size:12px;color:var(--muted);margin-bottom:6px">아래 신청들은 신청한 물량이 이미 다른 신청 건에 먼저 배부되어, 재고가 부족해 수령이 어려울 수 있습니다. "배부불가 예상수량"은 신청이 빠른 사람부터 받는다고 가정했을 때의 추정치이며, 실제로 누가 못 받을지는 관리자가 우선순위를 정해서 판단해야 합니다.</p>
+      <p style="font-size:13px;font-weight:700;margin-bottom:10px">⚠️ 영향 가능 신청 ${riskRows.length}건 · 배부불가 예상수량 합계 ${riskTotalQty.toLocaleString()}개</p>
+      <table><thead><tr><th>제품명</th><th>배부불가 예상수량</th><th>신청수량</th><th>신청시각</th><th>이름</th><th>본부/팀</th><th>연락처</th></tr></thead>
       <tbody>${riskRows.map(r=>`<tr>
         <td>${r.productName}</td>
-        <td style="font-weight:700;color:var(--red)">${r.currentStock.toLocaleString()}개</td>
+        <td style="font-weight:700;color:var(--red)">${r.atRiskQty.toLocaleString()}개</td>
+        <td>${r.qty.toLocaleString()}개</td>
         <td style="font-size:12px">${r.createdAt}</td>
         <td><a href="#" onclick="showDetail('${r.reqId}');return false" style="color:var(--blue)"><b>${r.name||'-'}</b></a></td>
         <td>${r.dept||'-'}<br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
         <td style="font-size:12px">${r.contact||'-'}</td>
-        <td>${r.qty.toLocaleString()}개</td>
       </tr>`).join('')}</tbody></table>`;
 
   const adminAddedSection = adminAddedRows.length === 0
@@ -1819,7 +1841,7 @@ function renderAdminAudit() {
       ${problemSection}
     </div>
     <div style="margin-bottom:24px">
-      <div class="section-header"><h2 style="font-size:15px">🚨 재고부족으로 못 받을 수 있는 신청 ${riskRows.length>0?`(${riskRows.length})`:''}</h2></div>
+      <div class="section-header"><h2 style="font-size:15px">🚨 다른 신청 건에 먼저 배부되어 수령이 어려운 신청 ${riskRows.length>0?`(${riskRows.length})`:''}</h2></div>
       ${riskSection}
     </div>
     <div>
@@ -1839,29 +1861,34 @@ function showStockDetail(num, kind) {
       const isDist = !!item.distributed;
       if (kind === 'requested' && isDist) return;
       if (kind === 'distributed' && !isDist) return;
+      // 'requested-all' = 배부 여부 상관없이 신청된 전체(실제신청합계 상세) — 신청수량(qty)
+      // 기준으로 통일해서 보여준다(배부수량이 아니라 "원래 얼마나 신청했는지"가 목적이므로).
       list.push({
         name: r.name || '-',
         dept: r.dept || '-',
         team: r.team || '-',
-        date: isDist ? (item.distributeDate || r.updatedAt || r.createdAt) : r.createdAt,
-        qty: isDist ? (item.distributedQty ?? item.qty) : item.qty
+        date: kind === 'distributed' ? (item.distributeDate || r.updatedAt || r.createdAt) : r.createdAt,
+        qty: kind === 'distributed' ? (item.distributedQty ?? item.qty) : item.qty,
+        status: isDist ? '배부완료' : (r.status === 'approved' ? '승인' : '대기중')
       });
     });
   });
   list.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   const total = list.reduce((s, e) => s + (Number(e.qty) || 0), 0);
-  const dateLabel = kind === 'requested' ? '신청일시' : '배부일';
-  const titleLabel = kind === 'requested' ? '📋 신청재고' : '📦 배부재고';
+  const dateLabel = kind === 'distributed' ? '배부일' : '신청일시';
+  const titleLabel = kind === 'distributed' ? '📦 배부재고' : (kind === 'requested-all' ? '📋 실제신청합계' : '📋 신청재고');
+  const showStatusCol = kind === 'requested-all';
 
   document.getElementById('modal-title').textContent = `${titleLabel} 상세 — ${prod ? prod.name : num}`;
   document.getElementById('modal-body').innerHTML = list.length ? `
     <table style="font-size:13px;width:100%">
-      <thead><tr><th>이름</th><th>본부/팀</th><th>${dateLabel}</th><th style="text-align:right">수량</th></tr></thead>
+      <thead><tr><th>이름</th><th>본부/팀</th><th>${dateLabel}</th>${showStatusCol?'<th>상태</th>':''}<th style="text-align:right">수량</th></tr></thead>
       <tbody>${list.map(e => `<tr>
         <td>${e.name}</td>
         <td>${e.dept} / ${e.team}</td>
         <td>${dateOnly(e.date) || e.date || '-'}</td>
+        ${showStatusCol?`<td>${e.status}</td>`:''}
         <td style="text-align:right">${(Number(e.qty) || 0).toLocaleString()}개</td>
       </tr>`).join('')}</tbody>
     </table>
