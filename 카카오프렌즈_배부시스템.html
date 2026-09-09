@@ -1739,22 +1739,27 @@ function computeStockAudit() {
     });
   });
 
+  // "문제 있는 품목"은 확정 배부량(distTotal)만으로 판단하지 않고 실제 현재재고
+  // (getStock — 이미 배부완료 + 아직 배부 안 된 대기중/승인 예약분까지 전부 반영된
+  // 값)가 마이너스인지로 판단한다. distTotal만 보면, 이미 배부된 양은 재고와
+  // 정확히 같은데 아직 안 나간 승인 건이 남아있어 실제로는 못 받을 상황인데도
+  // "문제 없음"으로 보였다 — 그 승인 건까지 감안해야 진짜 위험을 잡아낼 수 있다.
   const problemProducts = [];
   PRODUCTS.forEach(p => {
     const original = getOriginalStock(p.num);
     const distTotal = distTotalByNum[p.num] || 0;
-    const distRemaining = original - distTotal;
-    if (distRemaining < 0) problemProducts.push({ num: p.num, name: p.name, original, distTotal, distRemaining });
+    const currentStock = getStock(p.num);
+    if (currentStock < 0) problemProducts.push({ num: p.num, name: p.name, original, distTotal, currentStock });
   });
-  problemProducts.sort((a,b) => a.distRemaining - b.distRemaining);
+  problemProducts.sort((a,b) => a.currentStock - b.currentStock);
 
   const riskRows = [];
   problemProducts.forEach(pp => {
     (pendingItemsByNum[pp.num] || []).forEach(p => {
-      riskRows.push({ ...p, distRemaining: pp.distRemaining, productName: pp.name });
+      riskRows.push({ ...p, currentStock: pp.currentStock, productName: pp.name });
     });
   });
-  riskRows.sort((a,b) => a.distRemaining - b.distRemaining);
+  riskRows.sort((a,b) => a.currentStock - b.currentStock);
 
   return { problemProducts, adminAddedRows, riskRows };
 }
@@ -1763,12 +1768,12 @@ function renderAdminAudit() {
   const { problemProducts, adminAddedRows, riskRows } = computeStockAudit();
 
   const problemSection = problemProducts.length === 0
-    ? `<div class="empty"><div class="emoji">✅</div><p>실배부 기준으로 재고가 부족한 품목이 없습니다.</p></div>`
-    : `<table><thead><tr><th>제품번호</th><th>제품명</th><th>총재고</th><th>실제배부합계</th><th>실배부 기준 잔여재고</th></tr></thead>
+    ? `<div class="empty"><div class="emoji">✅</div><p>현재재고가 마이너스인 품목이 없습니다.</p></div>`
+    : `<table><thead><tr><th>제품번호</th><th>제품명</th><th>총재고</th><th>실제배부합계</th><th>현재재고</th></tr></thead>
       <tbody>${problemProducts.map(pp=>`<tr>
         <td>${pp.num}</td><td>${pp.name}</td><td>${pp.original.toLocaleString()}개</td>
         <td>${pp.distTotal.toLocaleString()}개</td>
-        <td style="font-weight:700;color:var(--red)">${pp.distRemaining.toLocaleString()}개</td>
+        <td style="font-weight:700;color:var(--red)">${pp.currentStock.toLocaleString()}개</td>
       </tr>`).join('')}</tbody></table>`;
 
   const riskSection = riskRows.length === 0
@@ -1776,7 +1781,7 @@ function renderAdminAudit() {
     : `<table><thead><tr><th>제품명</th><th>부족수량</th><th>신청시각</th><th>이름</th><th>본부/팀</th><th>연락처</th><th>신청수량</th></tr></thead>
       <tbody>${riskRows.map(r=>`<tr>
         <td>${r.productName}</td>
-        <td style="font-weight:700;color:var(--red)">${r.distRemaining.toLocaleString()}개</td>
+        <td style="font-weight:700;color:var(--red)">${r.currentStock.toLocaleString()}개</td>
         <td style="font-size:12px">${r.createdAt}</td>
         <td><a href="#" onclick="showDetail('${r.reqId}');return false" style="color:var(--blue)"><b>${r.name||'-'}</b></a></td>
         <td>${r.dept||'-'}<br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
