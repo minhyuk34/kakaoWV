@@ -658,9 +658,9 @@ async function loadStockFromAPI() {
     }
   } catch(e) { console.warn('재고 API 실패, 로컬 데이터 사용'); }
 }
-async function loadRequestsFromAPI() {
+async function loadRequestsFromAPI(force) {
   try {
-    const res = await api('getRequests', {name:currentUser.name, role:currentUser.role});
+    const res = await api('getRequests', {name:currentUser.name, role:currentUser.role, force: !!force});
     if (res.ok) reqCache = res.requests;
   } catch(e) { console.warn('신청 API 실패'); }
 }
@@ -2532,7 +2532,9 @@ async function refreshAdmin(auto) {
   // 재고는 이미 각 처리 시점에 실시간으로 반영되므로, 자동 새로고침에서는 생략하고
   // 사람이 직접 "새로고침"을 눌렀을 때만 재계산한다.
   if (!auto) { try { await api('syncStock'); } catch(e) {} }
-  await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
+  // 사람이 직접 누른 새로고침은 캐시를 건너뛰고 항상 최신 값을 받아온다(force) —
+  // 자동 새로고침(auto)은 캐시를 그대로 활용해 서버 부담을 줄인다.
+  await Promise.all([loadStockFromAPI(), loadRequestsFromAPI(!auto)]);
   renderAdmin();
   updateStats();
   const now = new Date().toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});

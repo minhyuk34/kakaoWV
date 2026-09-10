@@ -1119,6 +1119,14 @@ function doPost(e) {
       'updateRequestSchedule', 'updateItemQty', 'mergeIntoRequest', 'mergeRequests', 'returnDistributedQty',
       'editDistributedQty', 'addAdminItem'
     ];
+    // 신청 시트(SHEET_REQ)를 바꾸는 모든 액션 뒤에는 관리자용 getRequests 캐시를 비운다 —
+    // 안 비우면 방금 한 조정이 최대 REQ_CACHE_TTL_SEC초 동안 화면에 반영 안 될 수 있다.
+    const REQ_MUTATING_ACTIONS = REPORT_TRIGGER_ACTIONS.concat([
+      'saveDispatchMemo', 'saveDistLog', 'uploadReport', 'requestCancelItem'
+    ]);
+    if (result && result.ok !== false && REQ_MUTATING_ACTIONS.includes(action)) {
+      try { clearRequestsCache(); } catch (cacheErr) { Logger.log('캐시 초기화 실패: ' + cacheErr.message); }
+    }
     if (action === 'generateReport') {
       // 프런트에서 수동 새로고침 요청 시 직접 호출 가능 (이때는 바로 결과를 보여줘야 하므로 동기 실행)
       try { generateReport(); result = { ok: true }; }
@@ -1304,9 +1312,68 @@ function submitRequest_({ dept, team, name, contact, email, reason, pickupDate, 
 }
 
 // ── 신청 목록 조회 ────────────────────────────────────────────
-function getRequests({ name, role }) {
-  const sh = sheet(SHEET_REQ);
+// ── 관리자용 getRequests 결과 캐시 ──────────────────────────────
+// 신청 건수가 쌓일수록 관리자가 전체 시트를 매번 읽고 파싱하는 비용이 계속
+// 커진다(45초 자동 새로고침 + 각종 액션 후 재조회가 겹쳐 특히 부담). 일반
+// 유저는 이미 본인 행만 읽어서 가볍기 때문에 캐시는 관리자 응답에만 건다.
+// CacheService 한 키당 100KB 제한이 있어 90KB 단위로 쪼개 저장한다.
+const REQ_CACHE_PREFIX  = 'reqCacheV1_';
+const REQ_CACHE_TTL_SEC = 30;
+const REQ_CACHE_CHUNK   = 90000;
+
+function getRequestsFromCache() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const metaStr = cache.get(REQ_CACHE_PREFIX + 'meta');
+    if (!metaStr) return null;
+    const meta = JSON.parse(metaStr);
+    const keys = [];
+    for (let i = 0; i < meta.chunks; i++) keys.push(REQ_CACHE_PREFIX + 'c' + i);
+    const chunkMap = cache.getAll(keys);
+    let combined = '';
+    for (let i = 0; i < meta.chunks; i++) {
+      const part = chunkMap[REQ_CACHE_PREFIX + 'c' + i];
+      if (part === undefined || part === null) return null; // 일부 청크가 만료됐으면 캐시 무효 처리
+      combined += part;
+    }
+    return JSON.parse(combined);
+  } catch (e) {
+    return null; // 캐시 읽기 실패는 그냥 새로 조회하면 되므로 에러를 던지지 않는다
+  }
+}
+function setRequestsCache(reqs) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const json = JSON.stringify(reqs);
+    const chunks = [];
+    for (let i = 0; i < json.length; i += REQ_CACHE_CHUNK) chunks.push(json.slice(i, i + REQ_CACHE_CHUNK));
+    const payload = {};
+    chunks.forEach((c, i) => { payload[REQ_CACHE_PREFIX + 'c' + i] = c; });
+    payload[REQ_CACHE_PREFIX + 'meta'] = JSON.stringify({ chunks: chunks.length });
+    cache.putAll(payload, REQ_CACHE_TTL_SEC);
+  } catch (e) {
+    // 캐시 저장 실패해도 응답 자체는 이미 만들어졌으니 기능에는 지장 없음
+  }
+}
+// 신청 시트를 바꾸는 액션 뒤에 호출해서 캐시를 즉시 비운다 — 그래야 그 직후
+// 새로고침에서 방금 바뀐 내용이 캐시된 옛날 값 대신 바로 보인다.
+function clearRequestsCache() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const keys = [REQ_CACHE_PREFIX + 'meta'];
+    for (let i = 0; i < 50; i++) keys.push(REQ_CACHE_PREFIX + 'c' + i);
+    cache.removeAll(keys);
+  } catch (e) {}
+}
+
+function getRequests({ name, role, force }) {
   const isAdmin = role === 'admin';
+  if (isAdmin && !force) {
+    const cached = getRequestsFromCache();
+    if (cached) return { ok: true, requests: cached };
+  }
+
+  const sh = sheet(SHEET_REQ);
   // 이름 비교 시 앞뒤/중복 공백을 무시(다른 곳과 동일 규칙)
   const norm = s => String(s || '').trim().replace(/\s+/g, ' ');
   const wantName = norm(name);
@@ -1400,6 +1467,7 @@ function getRequests({ name, role }) {
     });
   });
 
+  if (isAdmin) setRequestsCache(reqs);
   return { ok: true, requests: reqs };
 }
 
