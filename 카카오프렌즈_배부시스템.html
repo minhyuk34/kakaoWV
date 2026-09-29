@@ -2730,7 +2730,17 @@ function runCancelConfirmStep(id, r, distributed, dateMap, methodMap, qtyMap, de
   finalizeDistribute(id, distributed, dateMap, methodMap, qtyMap, deferred, deferDate, toCancel);
 }
 
+let _distributing = false;
 async function finalizeDistribute(id, distributed, dateMap, methodMap, qtyMap, deferred, deferDate, toCancel) {
+  // 서버가 느릴 때 화면이 멈춘 것처럼 보여 같은 배부를 다시 누르는 일을 막고, 진행 중임을 알린다
+  if (_distributing) { toast('⏳ 앞선 배부 처리가 아직 진행 중입니다. 잠시만 기다려주세요.', 4000); return; }
+  _distributing = true;
+  toast('⏳ 배부 처리 중입니다… 서버가 느리면 1분 가까이 걸릴 수 있어요. 창을 닫지 말고 기다려주세요.', 90000);
+  try {
+    await finalizeDistributeInner(id, distributed, dateMap, methodMap, qtyMap, deferred, deferDate, toCancel);
+  } finally { _distributing = false; }
+}
+async function finalizeDistributeInner(id, distributed, dateMap, methodMap, qtyMap, deferred, deferDate, toCancel) {
   const pendingActionMap = {};
   deferred.forEach(idx => { pendingActionMap[idx] = 'defer'; });
   toCancel.forEach(idx => { pendingActionMap[idx] = 'cancel'; });
@@ -2874,10 +2884,10 @@ function showSubmitSuccess() {
 function closeSuccessPopup() {
   document.getElementById('success-popup').style.display='none';
 }
-function toast(msg) {
+function toast(msg, ms) {
   const el=document.getElementById('toast');
   el.textContent=msg; el.style.display='block';
-  clearTimeout(toast._t); toast._t=setTimeout(()=>el.style.display='none',2500);
+  clearTimeout(toast._t); toast._t=setTimeout(()=>el.style.display='none',ms||2500);
 }
 
 // ── INIT ──

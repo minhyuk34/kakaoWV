@@ -2617,13 +2617,16 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
         // 초과분만큼만 지금 추가로 차감하고 재고가 0 이하가 되면 경고 대상으로 기록한다.
         let distQty = (qtyMap && qtyMap[idx] !== undefined) ? Number(qtyMap[idx]) : item.qty;
         if (isNaN(distQty) || distQty < 0) distQty = item.qty;
-        if (distQty > item.qty) {
-          const excess = distQty - item.qty;
-          const newStock = adjustStockAllowNegative(item.num, -excess, {
+        // 이미 배부돼 초과분이 반영된 항목을 다시 저장(재시도·중복 클릭)하면 초과분이 또 차감되므로,
+        // 이전에 반영된 초과분과의 차이만 재고에 반영한다.
+        const prevExcess = wasDistributed ? Math.max(0, (Number(item.distributedQty ?? item.qty) || 0) - item.qty) : 0;
+        const excessDelta = Math.max(0, distQty - item.qty) - prevExcess;
+        if (excessDelta !== 0) {
+          const newStock = adjustStockAllowNegative(item.num, -excessDelta, {
             reqId: id, name: rows[i][4],
-            reason: `신청수량 초과 배부(${adminName || '관리자'}): ${item.name} +${excess}(초과분)`
+            reason: `신청수량 초과 배부(${adminName || '관리자'}): ${item.name} ${excessDelta > 0 ? '+' : ''}${excessDelta}(초과분)`
           });
-          if (newStock !== null && newStock <= 0) {
+          if (excessDelta > 0 && newStock !== null && newStock <= 0) {
             stockWarnings.push({ productName: item.name, newStock });
           }
         }
@@ -3515,9 +3518,28 @@ function scheduleDeferredRefresh() {
     .create();
 }
 
+const DEFERRED_RUNNING_KEY = 'deferredRefreshRunning';
 function runDeferredRefresh() {
+  const cache = CacheService.getScriptCache();
   // 이 시점 이후에 들어오는 변경은 새 예약으로 이어지도록 대기 표시를 먼저 해제
-  try { CacheService.getScriptCache().remove(DEFERRED_PENDING_KEY); } catch (e) {}
+  try { cache.remove(DEFERRED_PENDING_KEY); } catch (e) {}
+  // 앞선 갱신이 아직 도는 중이면 겹쳐 실행하지 않는다(겹치면 서로 느려지고 서버 슬롯을 다 차지함).
+  // 대신 1분 뒤에 한 번 다시 시도해서 그 사이의 변경도 반영되게 한다.
+  if (cache.get(DEFERRED_RUNNING_KEY)) {
+    ScriptApp.getProjectTriggers()
+      .filter(t => t.getHandlerFunction() === 'runDeferredRefresh')
+      .forEach(t => ScriptApp.deleteTrigger(t));
+    ScriptApp.newTrigger('runDeferredRefresh').timeBased().after(60000).create();
+    return;
+  }
+  cache.put(DEFERRED_RUNNING_KEY, '1', 300);
+  try {
+    runDeferredRefreshBody_();
+  } finally {
+    try { cache.remove(DEFERRED_RUNNING_KEY); } catch (e) {}
+  }
+}
+function runDeferredRefreshBody_() {
   // 1회성 트리거이므로 실행 후 스스로 정리
   ScriptApp.getProjectTriggers()
     .filter(t => t.getHandlerFunction() === 'runDeferredRefresh')
@@ -3584,10 +3606,19 @@ function syncPickupCalendar() {
   rangeEnd.setDate(rangeEnd.getDate() + 180);
   rangeEnd.setHours(23, 59, 59, 999);
 
-  cal.getEvents(rangeStart, rangeEnd).forEach(ev => ev.deleteEvent());
+  // 예전에는 범위 내 일정을 전부 지우고 전부 다시 만들어서, 신청이 늘수록 캘린더 호출이
+  // 수백 번씩 발생했다(배부 처리 한 번마다 몇 분 걸리며 서버 전체를 붙잡음). 이제는 화면에 있어야 할
+  // 일정 목록과 현재 캘린더를 비교해서 달라진 것만 지우고/만든다.
+  const tz = Session.getScriptTimeZone();
+  const evKey = (title, dateStr, desc) => title + '\u0001' + dateStr + '\u0001' + desc;
+  const existing = {}; // key → [CalendarEvent, ...]
+  cal.getEvents(rangeStart, rangeEnd).forEach(ev => {
+    const k = evKey(ev.getTitle(), Utilities.formatDate(ev.getAllDayStartDate(), tz, 'yyyy-MM-dd'), ev.getDescription());
+    (existing[k] = existing[k] || []).push(ev);
+  });
 
   const rows = sheet(SHEET_REQ).getDataRange().getValues().slice(1);
-  let count = 0;
+  let count = 0, created = 0;
 
   rows.forEach(r => {
     if (!r[0]) return;
@@ -3619,9 +3650,19 @@ function syncPickupCalendar() {
       `물품: ${itemSummary}`
     ].join('\n');
 
-    cal.createAllDayEvent(title, pd, { description: desc });
+    const k = evKey(title, pickupDate, desc);
+    if (existing[k] && existing[k].length > 0) {
+      existing[k].pop(); // 이미 똑같은 일정이 있으므로 그대로 둔다
+    } else {
+      cal.createAllDayEvent(title, pd, { description: desc });
+      created++;
+    }
     count++;
   });
 
-  Logger.log(`수취일정 캘린더 동기화 완료: ${count}건`);
+  // 남은 것 = 이제 필요 없어진 일정
+  let removed = 0;
+  Object.keys(existing).forEach(k => existing[k].forEach(ev => { ev.deleteEvent(); removed++; }));
+
+  Logger.log(`수취일정 캘린더 동기화 완료: 총 ${count}건 (신규 ${created}, 삭제 ${removed})`);
 }
