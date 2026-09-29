@@ -7,7 +7,6 @@ const SHEET_ID   = '12xx_3fs2EV3_6tpyukJmfhJBE_5-EPVkJ7-XiIvgdZc'; // ← 스프
 const SHEET_ACCT = '계정';
 const SHEET_REQ  = '신청';
 const SHEET_STK  = '재고';
-const SHEET_ZONE = '창고구역'; // 창고지도: 제품번호 → 구역(예: A_가) 매핑
 const ADMIN_EMAIL = 'minhyuk_jang@worldvision.or.kr';
 const APP_URL = 'https://minhyuk34.github.io/kakaoWV/'; // 비밀번호 재설정 링크 등에 사용
 
@@ -1042,7 +1041,7 @@ function fixLegacyDistributedItems() {
 
 // ── 시트 초기화 (최초 1회 실행) ──────────────────────────────
 function initSheets() {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ss = openSS();
 
   // 계정 시트 (이메일 컬럼 추가)
   let s = ss.getSheetByName(SHEET_ACCT) || ss.insertSheet(SHEET_ACCT);
@@ -1092,8 +1091,6 @@ function doPost(e) {
     else if (action === 'getStock')      result = getStock();
     else if (action === 'updateStock')   result = updateStock(data);
     else if (action === 'setProductBlocked') result = setProductBlocked(data);
-    else if (action === 'getProductZones') result = getProductZones();
-    else if (action === 'setProductZone')  result = setProductZone(data);
     else if (action === 'syncStock')       result = syncStock();
     else if (action === 'approveItems')    result = approveItems(data);
     else if (action === 'updateItemQty')   result = updateItemQty(data);
@@ -1127,6 +1124,11 @@ function doPost(e) {
     if (result && result.ok !== false && REQ_MUTATING_ACTIONS.includes(action)) {
       try { clearRequestsCache(); } catch (cacheErr) { Logger.log('캐시 초기화 실패: ' + cacheErr.message); }
     }
+    // 재고 수치는 신청/배부/취소뿐 아니라 재고 직접수정·차단·재계산에서도 바뀐다
+    if (result && result.ok !== false &&
+        (REQ_MUTATING_ACTIONS.includes(action) || ['updateStock', 'setProductBlocked', 'syncStock'].includes(action))) {
+      clearStockCache();
+    }
     if (action === 'generateReport') {
       // 프런트에서 수동 새로고침 요청 시 직접 호출 가능 (이때는 바로 결과를 보여줘야 하므로 동기 실행)
       try { generateReport(); result = { ok: true }; }
@@ -1155,12 +1157,15 @@ function doGet() {
 // ── 회원가입 ─────────────────────────────────────────────────
 function register({ name, email, hash }) {
   if (!name || !hash) return { ok: false, error: '이름과 비밀번호를 입력해주세요.' };
+  email = String(email || '').trim();
+  if (!/^[^\s@]+@worldvision\.or\.kr$/i.test(email))
+    return { ok: false, error: 'worldvision.or.kr 메일로만 가입할 수 있습니다.' };
   const s = sheet(SHEET_ACCT);
   const rows = s.getDataRange().getValues();
   if (rows.some(r => r[0] === name))
     return { ok: false, error: `"${name}" 이름으로 이미 가입된 계정이 있습니다.` };
   s.appendRow([name, hash, 'team', email || '', new Date().toLocaleString('ko-KR')]);
-  return { ok: true, role: 'team', name, email: email || '' };
+  return { ok: true, role: 'team', name, email };
 }
 
 // ── 로그인 ───────────────────────────────────────────────────
@@ -1319,7 +1324,7 @@ function submitRequest_({ dept, team, name, contact, email, reason, pickupDate, 
 // CacheService 한 키당 100KB 제한이 있어 90KB 단위로 쪼개 저장한다.
 const REQ_CACHE_PREFIX  = 'reqCacheV1_';
 const REQ_CACHE_TTL_SEC = 30;
-const REQ_CACHE_CHUNK   = 90000;
+const REQ_CACHE_CHUNK   = 30000; // 글자 수 기준 — 한글은 글자당 3바이트라 100KB 제한을 넘지 않게 보수적으로
 
 function getRequestsFromCache() {
   try {
@@ -1361,49 +1366,33 @@ function clearRequestsCache() {
   try {
     const cache = CacheService.getScriptCache();
     const keys = [REQ_CACHE_PREFIX + 'meta'];
-    for (let i = 0; i < 50; i++) keys.push(REQ_CACHE_PREFIX + 'c' + i);
+    for (let i = 0; i < 100; i++) keys.push(REQ_CACHE_PREFIX + 'c' + i);
     cache.removeAll(keys);
   } catch (e) {}
 }
 
 function getRequests({ name, role, force }) {
   const isAdmin = role === 'admin';
-  if (isAdmin && !force) {
-    const cached = getRequestsFromCache();
-    if (cached) return { ok: true, requests: cached };
-  }
-
-  const sh = sheet(SHEET_REQ);
   // 이름 비교 시 앞뒤/중복 공백을 무시(다른 곳과 동일 규칙)
   const norm = s => String(s || '').trim().replace(/\s+/g, ' ');
   const wantName = norm(name);
+  // 캐시/전체 조회는 모든 신청을 담지만, 관리자가 아니면 응답에는 본인 신청만 실어 보낸다.
+  const pick = list => isAdmin ? list : list.filter(r => norm(r.name) === wantName);
 
-  const lastRow = sh.getLastRow();
-  let rows;
-  if (lastRow < 2) {
-    rows = [];
-  } else if (isAdmin) {
-    rows = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
-  } else {
-    // 관리자가 아니면 이름 컬럼(E열)만 먼저 가볍게 읽어서 내 신청 행 번호만 골라낸다.
-    // 신청 건수가 쌓일수록 전체 시트(특히 무거운 물품목록 JSON)를 매번 통째로 읽는 게
-    // 느려지는 주된 원인이라, 남의 신청 데이터는 애초에 전송받지 않는 게 핵심 개선점이다.
-    const names = sh.getRange(2, 5, lastRow - 1, 1).getValues();
-    const matchedRowNums = [];
-    names.forEach((r, i) => { if (norm(r[0]) === wantName) matchedRowNums.push(i + 2); });
-    const lastCol = sh.getLastColumn();
-    rows = matchedRowNums.map(rowNum => sh.getRange(rowNum, 1, 1, lastCol).getValues()[0]);
+  if (!force) {
+    const cached = getRequestsFromCache();
+    if (cached) return { ok: true, requests: pick(cached) };
   }
+
+  // 전체를 한 번에 읽는다 — 예전엔 비관리자가 내 행마다 getRange를 따로 불러(N+1회 호출)
+  // 신청이 많은 사람일수록 오히려 느렸다. 한 번 읽어 공용 캐시에 넣어두면 다른 사용자도 같이 빨라진다.
+  const sh = sheet(SHEET_REQ);
+  const lastRow = sh.getLastRow();
+  const rows = lastRow < 2 ? [] : sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
   const reqs = [];
 
   rows.forEach(r => {
     if (!r[0]) return; // 빈 행 skip
-    // 관리자가 아니면 JSON 파싱 등 무거운 처리를 하기 전에 이름부터 먼저 걸러서
-    // 남의 신청 건은 아예 건드리지 않는다. 신청 건수가 쌓일수록 "내 신청" 하나 보려고
-    // 매번 전체 신청 데이터를 다 파싱하던 게 느려지는 주된 원인이라, 본인 것만 골라내는
-    // 이 한 줄이 체감 속도를 가장 크게 좌우한다.
-    if (!isAdmin && norm(r[4]) !== wantName) return;
-
     // 컬럼 자동 감지: 각 컬럼에서 JSON을 찾아서 위치 파악
     let itemsJson = '[]';
     let status    = '';
@@ -1467,8 +1456,8 @@ function getRequests({ name, role, force }) {
     });
   });
 
-  if (isAdmin) setRequestsCache(reqs);
-  return { ok: true, requests: reqs };
+  setRequestsCache(reqs);
+  return { ok: true, requests: pick(reqs) };
 }
 
 // ── 출고메모(관리자가 직접 적는 자유 메모, 17열) 저장 ──
@@ -1631,7 +1620,13 @@ function sendNotificationEmail(to, name, dept, team, reason, items, status, admi
 // ── 재고 조회 ─────────────────────────────────────────────────
 // 재고 시트 구조: A=제품번호, B=제품명, C=현재재고(잔여), D=원래재고
 // D열이 비어있으면 C열을 원래재고로 취급
+const STOCK_CACHE_KEY = 'stockCacheV1';
+const STOCK_CACHE_TTL_SEC = 20;
 function getStock() {
+  try {
+    const hit = CacheService.getScriptCache().get(STOCK_CACHE_KEY);
+    if (hit) return JSON.parse(hit);
+  } catch (e) {}
   const rows = sheet(SHEET_STK).getDataRange().getValues().slice(1);
   const stock = {};
   rows.forEach(r => {
@@ -1642,7 +1637,12 @@ function getStock() {
     const blocked  = String(r[5] || '').trim() === 'Y'; // F열: 신청차단(현장재고 불일치 등으로 관리자가 임시 차단)
     stock[num] = { current, original, blocked };
   });
-  return { ok: true, stock };
+  const result = { ok: true, stock };
+  try { CacheService.getScriptCache().put(STOCK_CACHE_KEY, JSON.stringify(result), STOCK_CACHE_TTL_SEC); } catch (e) {}
+  return result;
+}
+function clearStockCache() {
+  try { CacheService.getScriptCache().remove(STOCK_CACHE_KEY); } catch (e) {}
 }
 
 // ── 품목별 신청 차단/해제 (관리자) ────────────────────────────
@@ -1676,70 +1676,6 @@ function updateStock({ num, qty }) {
     }
   }
   return { ok: false, error: '제품을 찾을 수 없습니다.' };
-}
-
-// ── 창고지도: 제품 위치(구역) 조회/수정 ─────────────────────────
-function getProductZones() {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const s = ss.getSheetByName(SHEET_ZONE);
-  if (!s) return { ok: true, zones: {} }; // 아직 시트가 없으면 빈 매핑(프런트 기본값 사용)
-  const rows = s.getDataRange().getValues().slice(1);
-  const zones = {};
-  rows.forEach(r => {
-    if (!r[0] || !r[1]) return;
-    zones[String(r[0]).padStart(3, '0')] = String(r[1]).trim();
-  });
-  return { ok: true, zones };
-}
-
-// 관리자가 창고지도에서 제품 위치를 옮기거나(이동) 새로 지정할(추가) 때 사용
-function setProductZone({ num, zone, adminName }) {
-  if (!num || !zone) return { ok: false, error: '제품번호와 구역을 모두 입력하세요.' };
-  const paddedNum = String(num).padStart(3, '0');
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  let s = ss.getSheetByName(SHEET_ZONE);
-  if (!s) {
-    s = ss.insertSheet(SHEET_ZONE);
-    s.appendRow(['제품번호', '구역', '수정일시', '수정자']);
-    s.getRange(1, 1, 1, 4).setBackground('#3C1E1E').setFontColor('#FEE500').setFontWeight('bold');
-    s.setFrozenRows(1);
-  }
-  const rows = s.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]).padStart(3, '0') === paddedNum) {
-      s.getRange(i + 1, 2).setValue(zone);
-      s.getRange(i + 1, 3).setValue(new Date().toLocaleString('ko-KR'));
-      s.getRange(i + 1, 4).setValue(adminName || '관리자');
-      return { ok: true };
-    }
-  }
-  s.appendRow([paddedNum, zone, new Date().toLocaleString('ko-KR'), adminName || '관리자']);
-  return { ok: true };
-}
-
-// 최초 1회만 실행: "카카오리스트.xlsx"의 상품별 구역 시트에서 뽑은 기존 위치 데이터를
-// 창고구역 시트에 심어준다. 이미 창고구역 시트에 있는 제품번호는 건드리지 않고
-// 없는 것만 추가한다(관리자가 그 사이 직접 옮긴 위치를 덮어쓰지 않기 위함).
-function initWarehouseZonesFromData() {
-  const ZONES = {"005": "A_다", "006": "A_다", "007": "A_다", "010": "B_나", "011": "A_다", "012": "A_나", "013": "B_나", "014": "A_다", "015": "A_나", "016": "B_나", "017": "A_나", "018": "A_다", "019": "A_다", "020": "A_나", "021": "B_나", "022": "D_나", "023": "A_나", "025": "A_다", "026": "A_나", "027": "A_나", "028": "A_나", "029": "A_다", "030": "B_나", "031": "A_나", "032": "B_나", "033": "A_가", "034": "B_가", "035": "B_나", "036": "A_다", "037": "A_다", "038": "B_나", "039": "B_나", "040": "A_가", "041": "A_다", "042": "A_나", "043": "A_다", "044": "B_나", "045": "A_나", "046": "B_가", "047": "B_가", "048": "B_가", "049": "A_가", "050": "A_가", "051": "B_나", "052": "B_나", "053": "B_가", "054": "B_가", "055": "A_나", "056": "D_나", "057": "A_다", "058": "B_가", "059": "A_다", "060": "A_다", "063": "A_다", "064": "B_나", "065": "B_나", "067": "B_가", "068": "B_나", "070": "A_다", "071": "A_다", "072": "B_가", "074": "B_나", "075": "A_다", "077": "B_나", "078": "A_다", "079": "B_가", "081": "B_나", "082": "D_가", "083": "D_나", "084": "D_나", "086": "C_나", "087": "D_나", "088": "D_나", "089": "D_나", "090": "D_나", "091": "C_나", "092": "C_나", "094": "C_나", "096": "D_나", "097": "D_나", "098": "D_가", "099": "D_가", "100": "B_가", "102": "A_가", "103": "D_나", "104": "A_가", "105": "B_가", "106": "A_가", "107": "C_나", "108": "B_가", "109": "B_가", "110": "A_가", "111": "B_가", "112": "D_나", "113": "A_가", "114": "D_나", "115": "B_가", "116": "A_가", "117": "B_가", "119": "B_나", "120": "C_가", "121": "C_나", "122": "D_나", "123": "C_나", "124": "B_나", "125": "D_가", "126": "B_나", "127": "B_나", "128": "C_가", "131": "B_나", "132": "B_나", "133": "B_나", "134": "B_나", "135": "B_나", "136": "B_나", "137": "C_가", "138": "B_나", "139": "B_나", "140": "D_나", "141": "B_나", "142": "B_나", "143": "B_나", "144": "B_나"};
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  let s = ss.getSheetByName(SHEET_ZONE);
-  if (!s) {
-    s = ss.insertSheet(SHEET_ZONE);
-    s.appendRow(['제품번호', '구역', '수정일시', '수정자']);
-    s.getRange(1, 1, 1, 4).setBackground('#3C1E1E').setFontColor('#FEE500').setFontWeight('bold');
-    s.setFrozenRows(1);
-  }
-  const existing = new Set(s.getDataRange().getValues().slice(1).map(r => String(r[0]).padStart(3, '0')));
-  const now = new Date().toLocaleString('ko-KR');
-  const newRows = Object.entries(ZONES)
-    .filter(([num]) => !existing.has(num))
-    .map(([num, zone]) => [num, zone, now, '초기 데이터(엑셀)']);
-  if (newRows.length > 0) {
-    s.getRange(s.getLastRow() + 1, 1, newRows.length, 4).setValues(newRows);
-  }
-  Logger.log(`창고구역 초기화 완료: ${newRows.length}건 추가(이미 있던 ${existing.size}건은 유지)`);
-  try { SpreadsheetApp.getUi().alert(`창고구역 ${newRows.length}건을 새로 추가했습니다.`); } catch (e) {}
 }
 
 // ── 재고 재계산 (구글시트 행 삭제 후 동기화) ──────────────────
@@ -1816,7 +1752,7 @@ function restoreStock(num, qty, meta) { adjustStock(num, +qty, meta); }
 // 재고가 바뀌는 모든 지점(adjustStock/adjustStockAllowNegative)에서 공통으로 호출되어
 // "언제, 어떤 신청 때문에, 왜, 얼마나" 바뀌었는지 별도 시트에 남긴다.
 function ensureChangeLogSheet() {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ss = openSS();
   let s = ss.getSheetByName('변경이력');
   if (!s) {
     s = ss.insertSheet('변경이력');
@@ -2985,7 +2921,7 @@ function testEmail() {
 // ── 피드백 제출 ───────────────────────────────────────────────
 function submitFeedback({ name, dept, rating, category, text }) {
   if (!text) return { ok: false, error: '의견을 입력해주세요.' };
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ss = openSS();
   let s = ss.getSheetByName('피드백');
   if (!s) {
     s = ss.insertSheet('피드백');
@@ -2998,7 +2934,7 @@ function submitFeedback({ name, dept, rating, category, text }) {
 
 // ── 피드백 조회 (관리자용) ────────────────────────────────────
 function getFeedback() {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ss = openSS();
   const s = ss.getSheetByName('피드백');
   if (!s || s.getLastRow() <= 1) return { ok: true, feedbacks: [] };
   const rows = s.getDataRange().getValues().slice(1).reverse();
@@ -3010,8 +2946,15 @@ function getFeedback() {
 }
 
 // ── 유틸 ──────────────────────────────────────────────────────
+// 한 번의 실행(요청) 안에서는 같은 스프레드시트 객체를 재사용한다 — openById는 열 때마다
+// 비용이 들고, 재고 조정처럼 sheet()를 여러 번 부르는 흐름에서 그 비용이 누적됐다.
+let _ssMemo = null;
+function openSS() {
+  if (!_ssMemo) _ssMemo = SpreadsheetApp.openById(SHEET_ID);
+  return _ssMemo;
+}
 function sheet(name) {
-  return SpreadsheetApp.openById(SHEET_ID).getSheetByName(name);
+  return openSS().getSheetByName(name);
 }
 
 // 시트가 날짜처럼 보이는 문자열을 Date 객체로 자동 변환해버리는 문제를 방지:
@@ -3041,7 +2984,7 @@ function generateReport() {
   // 재고가 반영되기 전 스냅샷을 보여주게 되므로, 항상 재계산부터 하고 시작한다.
   try { syncStock(); } catch (e) { Logger.log('generateReport 내 syncStock 실패: ' + e.message); }
 
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ss = openSS();
 
   // 기존 시트 삭제 후 재생성
   const existing = ss.getSheetByName('배부현황');
@@ -3240,7 +3183,7 @@ function generateReport() {
 //     가능성이 높다는 뜻이라 목록으로 뽑아준다.
 function generateAuditSheets() {
   try { syncStock(); } catch (e) { Logger.log('generateAuditSheets 내 syncStock 실패: ' + e.message); }
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ss = openSS();
 
   const stockMap = {};
   sheet(SHEET_STK).getDataRange().getValues().slice(1).forEach(r => {
@@ -3554,7 +3497,15 @@ function testSendReportEmailToJangMinhyuk() {
 // 매 액션마다 무거운 재생성을 동기로 돌리면 버튼 클릭이 매번 느려지므로,
 // "몇 초 뒤 한 번만 갱신"을 예약해서 실제 작업은 백그라운드에서 처리한다.
 // 연속으로 여러 액션이 들어와도 기존 예약을 지우고 다시 잡기 때문에 트리거가 쌓이지 않는다.
+// ScriptApp의 트리거 조회/삭제/생성은 호출마다 수 초가 걸려서, 이 함수를 요청 안에서 매번
+// 실행하면 "즉시 응답"이라는 의도와 달리 버튼 하나 누를 때마다 느려진다. 이미 곧 실행될
+// 예약이 있으면(30초 이내) 트리거를 건드리지 않고 건너뛴다 — 예약된 실행이 그때의 최신
+// 데이터를 읽으므로 결과는 같다.
+const DEFERRED_PENDING_KEY = 'deferredRefreshPending';
 function scheduleDeferredRefresh() {
+  const cache = CacheService.getScriptCache();
+  if (cache.get(DEFERRED_PENDING_KEY)) return;
+  cache.put(DEFERRED_PENDING_KEY, '1', 30);
   ScriptApp.getProjectTriggers()
     .filter(t => t.getHandlerFunction() === 'runDeferredRefresh')
     .forEach(t => ScriptApp.deleteTrigger(t));
@@ -3565,6 +3516,8 @@ function scheduleDeferredRefresh() {
 }
 
 function runDeferredRefresh() {
+  // 이 시점 이후에 들어오는 변경은 새 예약으로 이어지도록 대기 표시를 먼저 해제
+  try { CacheService.getScriptCache().remove(DEFERRED_PENDING_KEY); } catch (e) {}
   // 1회성 트리거이므로 실행 후 스스로 정리
   ScriptApp.getProjectTriggers()
     .filter(t => t.getHandlerFunction() === 'runDeferredRefresh')

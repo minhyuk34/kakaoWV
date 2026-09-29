@@ -53,24 +53,6 @@ nav .user-info{font-size:13px;color:var(--kakao);font-weight:600}
 .badge-status.off{background:#FEE9E7;color:var(--red)}.badge-status.dist{background:var(--card);color:var(--muted)}
 .stock-info{font-size:12px;color:var(--muted);margin-top:8px}
 .stock-info.low{color:var(--red);font-weight:600}
-/* 창고지도 */
-.wh-col-headers{display:grid;grid-template-columns:60px 1fr 26px 1fr 26px 1fr 26px 1fr;gap:6px;margin-bottom:6px}
-.wh-col-headers .wh-col-head{text-align:center;font-size:13px;font-weight:800;color:var(--brown)}
-.wh-grid{display:grid;grid-template-columns:60px 1fr 26px 1fr 26px 1fr 26px 1fr;gap:8px;background:var(--card);border:1.5px solid var(--border);border-radius:12px;padding:14px}
-.wh-row-label{display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:var(--brown);writing-mode:vertical-rl}
-.wh-zone{background:linear-gradient(155deg,#ffd9b8 0%,#ffb877 55%,#f4761f 100%);border:3px solid var(--brown);border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;transition:transform .15s,box-shadow .15s;min-height:64px;display:flex;flex-direction:column;justify-content:center;gap:2px;box-shadow:0 2px 0 rgba(34,37,42,.25),0 3px 8px rgba(0,0,0,.1)}
-.wh-zone:hover{transform:translateY(-3px);box-shadow:0 5px 0 rgba(34,37,42,.25),0 8px 16px rgba(0,0,0,.18)}
-.wh-zone-code{font-size:13px;font-weight:900;color:var(--brown)}
-.wh-zone-count{font-size:16px;font-weight:900;color:var(--brown)}
-.wh-zone-species{font-size:10px;color:var(--brown);opacity:.8;font-weight:600}
-.wh-zone-highlight{background:linear-gradient(155deg,#FF8A3D 0%,#FF6B1A 55%,#FF9A4D 100%);border-color:#B8390C;box-shadow:0 0 0 4px rgba(255,107,26,.4),0 4px 12px rgba(255,107,26,.5)}
-.wh-zone-highlight .wh-zone-code,.wh-zone-highlight .wh-zone-count,.wh-zone-highlight .wh-zone-species{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.25)}
-.wh-pillar{display:flex;align-items:center;justify-content:center;background:repeating-linear-gradient(45deg,#8a8a8a,#8a8a8a 4px,#b0b0b0 4px,#b0b0b0 8px);border-radius:4px;font-size:9px;color:#fff;font-weight:700;writing-mode:vertical-rl;text-shadow:0 1px 1px rgba(0,0,0,.3)}
-.wh-door-row{text-align:center;font-size:12px;font-weight:700;color:var(--brown);margin-top:8px;padding-top:8px;border-top:2px dashed var(--kakao)}
-@media (max-width:640px){
-  .wh-col-headers,.wh-grid{grid-template-columns:40px 1fr 18px 1fr 18px 1fr 18px 1fr}
-  .wh-zone-code,.wh-zone-count{font-size:11px}
-}
 .progress-bar{height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px}
 .progress-fill{height:100%;border-radius:3px;background:var(--green);transition:width .4s}
 .progress-fill.low{background:var(--red)}
@@ -225,7 +207,6 @@ tr:hover td{background:var(--card)}
   <span class="user-info" id="userInfo"></span>
   <button onclick="closeCartAndShow('catalog')" id="btn-catalog">제품 목록</button>
   <button onclick="showPage('myreq')" id="btn-myreq">주문내역 <span class="badge" id="myreq-badge" style="display:none">0</span></button>
-  <button onclick="showPage('warehouse')" id="btn-warehouse">🗺️ 창고지도</button>
   <button onclick="showPage('admin')" id="btn-admin" style="display:none">관리자</button>
   <button onclick="toggleCart()" id="btn-cart">📋 장바구니 <span class="badge" id="cart-badge" style="display:none">0</span></button>
   <button onclick="showPage('feedback')" id="btn-feedback">💬 피드백</button>
@@ -271,7 +252,7 @@ tr:hover td{background:var(--card)}
       <!-- 4 -->
       <div style="background:var(--bg);border-radius:12px;padding:14px 16px;border-left:3px solid #0984E3;box-shadow:0 1px 4px rgba(34,37,42,.06)">
         <div style="font-size:12px;font-weight:800;color:#0984E3;margin-bottom:4px">✍️ 회원가입 안내</div>
-        <div style="font-size:13px;line-height:1.6;color:var(--text)">이름과 비밀번호만 입력하시면 됩니다. <b>가명도 가능</b>합니다.</div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text)">이름·<b>@worldvision.or.kr 이메일</b>·비밀번호를 입력하시면 됩니다. 이름은 <b>가명도 가능</b>합니다.<br><span style="color:#0984E3;font-weight:700">※ worldvision.or.kr 메일로만 가입할 수 있습니다.</span></div>
       </div>
     </div>
   </div>
@@ -289,6 +270,7 @@ tr:hover td{background:var(--card)}
       <button id="tab-login" onclick="switchTab('login')" style="flex:1;padding:9px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;background:var(--kakao);color:var(--on-primary)">로그인</button>
       <button id="tab-register" onclick="switchTab('register')" style="flex:1;padding:9px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;background:transparent;color:var(--muted)">회원가입</button>
     </div>
+    <div style="background:var(--card);border-radius:8px;padding:8px 10px;margin:-8px 0 16px;font-size:12px;line-height:1.5;text-align:center;color:var(--muted)">🔐 <b>worldvision.or.kr</b> 메일로만 가입할 수 있습니다</div>
     <div id="form-login">
       <div style="margin-bottom:14px">
         <label style="font-size:12px;font-weight:700;color:var(--muted)">이름</label>
@@ -308,8 +290,8 @@ tr:hover td{background:var(--card)}
         <input id="reg-name" type="text" placeholder="홍길동" maxlength="20" style="width:100%;margin-top:5px;padding:11px 14px;border:2px solid var(--border);border-radius:10px;font-size:15px;outline:none" onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'">
       </div>
       <div style="margin-bottom:12px">
-        <label style="font-size:12px;font-weight:700;color:var(--muted)">이메일 * <span style="font-weight:400;color:var(--muted)">(승인/반려 알림 수신)</span></label>
-        <input id="reg-email" type="email" placeholder="goods@worldvision.or.kr" style="width:100%;margin-top:5px;padding:11px 14px;border:2px solid var(--border);border-radius:10px;font-size:15px;outline:none" onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'">
+        <label style="font-size:12px;font-weight:700;color:var(--muted)">이메일 * <span style="font-weight:400;color:var(--muted)">(@worldvision.or.kr만 가능 · 승인/반려 알림 수신)</span></label>
+        <input id="reg-email" type="email" placeholder="아이디@worldvision.or.kr" style="width:100%;margin-top:5px;padding:11px 14px;border:2px solid var(--border);border-radius:10px;font-size:15px;outline:none" onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'">
       </div>
       <div style="margin-bottom:12px">
         <label style="font-size:12px;font-weight:700;color:var(--muted)">비밀번호 * (6자 이상)</label>
@@ -455,21 +437,6 @@ tr:hover td{background:var(--card)}
   <div id="myreq-content"></div>
 </div>
 
-<!-- 창고지도 -->
-<div class="page" id="page-warehouse">
-  <div class="section-header">
-    <h2>🗺️ 창고지도</h2>
-    <div style="display:flex;gap:8px">
-      <button onclick="findMyItemsOnMap()" id="wh-find-btn" style="background:var(--blue);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">📍 내 신청 물품 찾기</button>
-      <button onclick="clearWarehouseHighlight()" id="wh-clear-btn" style="display:none;background:#fff;border:1.5px solid var(--border);color:var(--muted);border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">✕ 강조 해제</button>
-    </div>
-  </div>
-  <p style="font-size:13px;color:var(--muted);margin:-6px 0 14px">구역을 클릭하면 그 구역에 있는 제품과 현재 재고 수량을 볼 수 있습니다. 실제 배부되어 나간 수량은 자동으로 빠지고 남은 개수만 표시됩니다.</p>
-  <div id="warehouse-find-result"></div>
-  <div id="warehouse-map"></div>
-  <div id="warehouse-unassigned"></div>
-</div>
-
 <!-- 관리자 -->
 <div class="page" id="page-admin">
   <div class="dash-grid" id="admin-dash"></div>
@@ -613,18 +580,6 @@ async function api(action, data={}) {
 const STOCK_DATA = {"002": 158, "003": 1292, "004": 8, "005": 14, "006": 917, "007": 4, "008": 79, "009": 107, "011": 1100, "012": 800, "013": 500, "014": 400, "015": 1300, "016": 1200, "017": 1100, "018": 400, "019": 1000, "021": 500, "022": 700, "023": 66, "024": 43, "025": 700, "026": 700, "027": 800, "028": 1200, "029": 6300, "030": 10300, "031": 14600, "032": 70, "033": 135, "034": 151, "035": 500, "036": 500, "037": 900, "038": 300, "040": 1800, "041": 1300, "042": 2563, "043": 1500, "044": 900, "045": 800, "046": 1600, "047": 500, "048": 250, "049": 500, "050": 300, "051": 1000, "052": 400, "053": 1200, "054": 1400, "055": 1100, "056": 14, "057": 470, "058": 356, "059": 203, "060": 459, "061": 111, "062": 48, "063": 200, "064": 71, "065": 117, "066": 17, "067": 90, "068": 400, "069": 900, "070": 200, "071": 200, "072": 400, "073": 800, "074": 400, "075": 400, "076": 40, "077": 400, "078": 200, "079": 500, "080": 100, "081": 400, "082": 400, "083": 100, "084": 800, "085": 100, "086": 377, "087": 100, "088": 100, "089": 100, "090": 50, "091": 800, "092": 500, "093": 100, "094": 300, "095": 200, "096": 100, "097": 800, "098": 100, "099": 80, "100": 100, "101": 300, "102": 400, "103": 100, "104": 100, "105": 300, "106": 400, "107": 500, "108": 600, "109": 200, "110": 1400, "111": 200, "112": 500, "113": 390, "114": 2000, "115": 300, "116": 200, "117": 400, "118": 500, "119": 300, "120": 600, "121": 200, "122": 200, "123": 1000, "124": 800, "125": 800, "126": 100, "127": 600, "128": 300, "129": 1300, "130": 400, "131": 100, "132": 1200, "133": 1380, "134": 1450, "135": 200, "136": 500, "137": 400, "138": 200, "139": 300, "140": 600, "141": 200, "142": 8300, "143": 168, "144": 10000, "001": 3, "010": 400, "020": 1400};
 
 const PRODUCTS = [{"id": 1, "num": "001", "name": "넷플릭스 오징어게임X프렌즈 플레이어 키링_춘식이", "price": "19,000원", "price_num": 19000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 2, "num": "002", "name": "넷플릭스 오징어게임X프렌즈 영희키링(뉴코스튬)_춘식이", "price": "19,000원", "price_num": 19000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 3, "num": "003", "name": "넷플릭스 오징어게임X프렌즈 투명스티커_춘식이", "price": "3,000원", "price_num": 3000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 4, "num": "004", "name": "넷플릭스 오징어게임X카카오 프렌즈 영희 엽서_춘식이", "price": "2,500원", "price_num": 2500, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 5, "num": "005", "name": "넷플릭스 오징어게임X카카오 프렌즈 중형인형_춘식이", "price": "43,000원", "price_num": 43000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 6, "num": "006", "name": "넷플릭스 오징어게임X카카오 프렌즈 LED 키링_춘식이", "price": "19,000원", "price_num": 19000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 7, "num": "007", "name": "춘식이생일파티 실리콘참", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 8, "num": "008", "name": "춘식이 포토 형태 아크릴 키링 후드티 춘식이", "price": "6,900원", "price_num": 6900, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 9, "num": "009", "name": "쬬르디 미니파우치_뽀짝쬬", "price": "13,000원", "price_num": 13000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 10, "num": "010", "name": "포슬인형 코스튬_명화시리즈_고흐", "price": "11,900원", "price_num": 11900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 11, "num": "011", "name": "골골즈 스마트폰 스트랩_박밤이", "price": "19,000원", "price_num": 19000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 12, "num": "012", "name": "골골즈  스마트폰 스트랩_김콩이", "price": "19,000원", "price_num": 19000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 13, "num": "013", "name": "골골즈  안경 케이스_박밤이", "price": "10,000원", "price_num": 10000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 14, "num": "014", "name": "골골즈 안경 케이스_김콩이", "price": "10,000원", "price_num": 10000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 15, "num": "015", "name": "쬬르디 실리콘 러기지택_어쩔쬬&철벽쬬", "price": "13,000원", "price_num": 13000, "status": "배부중", "stock": 10, "category": "차량·이동"}, {"id": 16, "num": "016", "name": "쬬르디 실리콘 러기지택_할미쬬&말티쬬", "price": "13,000원", "price_num": 13000, "status": "배부중", "stock": 10, "category": "차량·이동"}, {"id": 17, "num": "017", "name": "포슬인형 코스튬_낚시", "price": "13,900원", "price_num": 13900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 18, "num": "018", "name": "포슬인형 코스튬_테니스", "price": "13,900원", "price_num": 13900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 19, "num": "019", "name": "힙스터 거북이 데코인형_라이언", "price": "14,000원", "price_num": 14000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 20, "num": "020", "name": "힙스터 거북이 데코인형_춘식이", "price": "14,000원", "price_num": 14000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 21, "num": "021", "name": "김다예X카카오프렌즈 코스터_춘식이", "price": "11,000원", "price_num": 11000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 22, "num": "022", "name": "김다예X카카오프렌즈 카드(투게더)_춘식이", "price": "2,500원", "price_num": 2500, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 23, "num": "023", "name": "골골즈 차량용 목쿠션_박밤이", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "차량·이동"}, {"id": 24, "num": "024", "name": "골골즈 차량용 목쿠션_김콩이", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "차량·이동"}, {"id": 25, "num": "025", "name": "춘식버스 데코인형 귀족영애_춘식이", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 26, "num": "026", "name": "갱얼쥐 닥스훈트 인형_춘식이", "price": "26,000원", "price_num": 26000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 27, "num": "027", "name": "갱얼쥐 푸들 인형_춘식이", "price": "26,000원", "price_num": 26000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 28, "num": "028", "name": "고구마 요정 코듀로이 인형_춘식이", "price": "29,000원", "price_num": 29000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 29, "num": "029", "name": "쬬르디 랜덤 펠트 키링인형_쬬르디", "price": "6,500원", "price_num": 6500, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 30, "num": "030", "name": "쬬르디 랜덤 북마크_쬬르디", "price": "2,500원", "price_num": 2500, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 31, "num": "031", "name": "쬬르디 랜덤 실리콘참_쬬르디", "price": "3,900원", "price_num": 3900, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 32, "num": "032", "name": "세이치즈 와펜 헤어밴드 세트 라이언", "price": "16,500원", "price_num": 16500, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 33, "num": "033", "name": "골골즈 얼굴쿠션_박밤이", "price": "22,000원", "price_num": 22000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 34, "num": "034", "name": "골골즈 얼굴쿠션_김콩이", "price": "22,000원", "price_num": 22000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 35, "num": "035", "name": "세비지 맥세이프 카드홀더 골골즈_프렌즈", "price": "19,000원", "price_num": 19000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 36, "num": "036", "name": "러브 러브 스탠딩 자석판 인형_춘식이", "price": "18,000원", "price_num": 18000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 37, "num": "037", "name": "골골즈 투명파우치_골골즈", "price": "9,000원", "price_num": 9000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 38, "num": "038", "name": "골골즈 미니키링인형 스포티_김콩이", "price": "14,000원", "price_num": 14000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 39, "num": "039", "name": "미니거울 스마트폰참키링 행운_라이언", "price": "12,000원", "price_num": 12000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 40, "num": "040", "name": "미니거울 스마트폰참키링 하트_춘식이", "price": "12,000원", "price_num": 12000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 41, "num": "041", "name": "페이스 체인지 피규어_춘식이", "price": "19,000원", "price_num": 19000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 42, "num": "042", "name": "무빙피규어 춘데렐라_춘식이", "price": "24,000원", "price_num": 24000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 43, "num": "043", "name": "쬬르디 미니피규어키링_탕후루쬬", "price": "10,000원", "price_num": 10000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 44, "num": "044", "name": "김다예X프렌즈 카드커버 스티커 세트_라&춘", "price": "5,000원", "price_num": 5000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 45, "num": "045", "name": "김다예X프렌즈 이너피스 부클스티커_춘식이", "price": "9,000원", "price_num": 9000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 46, "num": "046", "name": "시골집 핫팩 목베개_춘식이", "price": "25,000원", "price_num": 25000, "status": "배부중", "stock": 10, "category": "차량·이동"}, {"id": 47, "num": "047", "name": "포슬인형 코스튬_춘식버스 귀족영애", "price": "15,900원", "price_num": 15900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 48, "num": "048", "name": "오늘의요정 풍경 능이요정_춘식이", "price": "18,000원", "price_num": 18000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 49, "num": "049", "name": "오늘의요정 인형 반반요정_춘식이", "price": "26,000원", "price_num": 26000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 50, "num": "050", "name": "오늘의요정 인형 능이요정_춘식이", "price": "26,000원", "price_num": 26000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 51, "num": "051", "name": "피규어꾸미기세트 꿀벌_춘식이", "price": "19,000원", "price_num": 19000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 52, "num": "052", "name": "포슬인형 하우스_라이언 테이블&스툴SET", "price": "9,900원", "price_num": 9900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 53, "num": "053", "name": "쬬르디 차량용 미니 데코 피규어 세트_뽀짝쬬", "price": "18,000원", "price_num": 18000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 54, "num": "054", "name": "쬬르디 차량 송풍구 피규어_할미쬬", "price": "12,000원", "price_num": 12000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 55, "num": "055", "name": "눈사람이 된 뽀글 인형_춘식이", "price": "38,000원", "price_num": 38000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 56, "num": "056", "name": "별별춘식 메탈 키링 마법사", "price": "12,900원", "price_num": 12900, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 57, "num": "057", "name": "라이즈X프렌즈 틴케이스 스티커팩", "price": "10,000원", "price_num": 10000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 58, "num": "058", "name": "라이즈X프렌즈 DIY 아크릴 키링_멍룡이 (앤톤)", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 59, "num": "059", "name": "라이즈X프렌즈 DIY 아크릴 키링_똘병 (소희)", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 60, "num": "060", "name": "라이즈X프렌즈 DIY 아크릴 키링_우락밤 (성찬)", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 61, "num": "061", "name": "라이즈X프렌즈 DIY 아크릴 키링_송용돌이 (은석)", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 62, "num": "062", "name": "라이즈X프렌즈 DIY 아크릴 키링_리즈코 (쇼타로)", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 63, "num": "063", "name": "포슬인형 코스튬_루돌프", "price": "11,900원", "price_num": 11900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 64, "num": "064", "name": "해피 가드닝_인형_튜브", "price": "27,000원", "price_num": 27000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 65, "num": "065", "name": "HBD 프린세스 피규어_춘식이", "price": "17,000원", "price_num": 17000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 66, "num": "066", "name": "키즈 애착인형 무찡", "price": "25,000원", "price_num": 25000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 67, "num": "067", "name": "오해피치데이 폰케이스_S22_라이언", "price": "14,000원", "price_num": 14000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 68, "num": "068", "name": "유캔두잇 시간관리 타이머_춘식이", "price": "39,000원", "price_num": 39000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 69, "num": "069", "name": "쬬르디 차량 데코인형_말티쬬", "price": "12,000원", "price_num": 12000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 70, "num": "070", "name": "포슬인형 하우스_춘식이 테이블&스툴SET", "price": "9,900원", "price_num": 9900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 71, "num": "071", "name": "러브 허그미 스탠딩 자석판 인형_라이언", "price": "18,000원", "price_num": 18000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 72, "num": "072", "name": "메론빵 거북이 청소솔_라이언", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 73, "num": "073", "name": "골골즈 투명스티커 블루_골골즈", "price": "2,500원", "price_num": 2500, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 74, "num": "074", "name": "포슬인형 코스튬_가디건&비니", "price": "11,900원", "price_num": 11900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 75, "num": "075", "name": "쬬르디 실리콘 동전지갑_뽀짝쬬", "price": "12,000원", "price_num": 12000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 76, "num": "076", "name": "춘식버스 PVC 카드홀더_춘식이", "price": "13,000원", "price_num": 13000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 77, "num": "077", "name": "쬬르디 미니파우치_어쩔쬬", "price": "13,000원", "price_num": 13000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 78, "num": "078", "name": "포슬인형 코스튬_케이프&모자", "price": "11,900원", "price_num": 11900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 79, "num": "079", "name": "쬬르디 인형_누구시쬬", "price": "20,000원", "price_num": 20000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 80, "num": "080", "name": "포슬인형 하우스_죠르디 테이블&스툴SET", "price": "9,900원", "price_num": 9900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 81, "num": "081", "name": "쬬르디 차량용 도어가드_말티쬬", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "차량·이동"}, {"id": 82, "num": "082", "name": "갱얼쥐 말티즈 인형_춘식이", "price": "26,000원", "price_num": 26000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 83, "num": "083", "name": "볼 발그레 포슬 키링인형_리틀무지", "price": "12,000원", "price_num": 12000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 84, "num": "084", "name": "달콤하구마 향기나는 키링인형_춘식이", "price": "13,000원", "price_num": 13000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 85, "num": "085", "name": "별별춘식 드레스업 인형 마스터", "price": "26,000원", "price_num": 26000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 86, "num": "086", "name": "쬬르디 인형_뽀짝쬬", "price": "19,000원", "price_num": 19000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 87, "num": "087", "name": "포슬인형 코스튬_후드&선글라스", "price": "11,900원", "price_num": 11900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 88, "num": "088", "name": "포슬인형 코스튬_벚꽃놀이", "price": "12,900원", "price_num": 12900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 89, "num": "089", "name": "춘식버스 데코인형 냥아치_춘식이", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 90, "num": "090", "name": "레이지선데이 스트링 파우치_라이언&튜브", "price": "11,000원", "price_num": 11000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 91, "num": "091", "name": "포슬인형 코스튬-배쓰타임세트", "price": "11,900원", "price_num": 11900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 92, "num": "092", "name": "쬬르디 인형_말티쬬", "price": "19,000원", "price_num": 19000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 93, "num": "093", "name": "쬬르디 데코스티커 피곤_군인쬬", "price": "1,000원", "price_num": 1000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 94, "num": "094", "name": "세비지 중형인형_춘식이", "price": "33,000원", "price_num": 33000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 95, "num": "095", "name": "포슬인형 코스튬_니트&크로스백", "price": "11,900원", "price_num": 11900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 96, "num": "096", "name": "쬬르디 미니파우치_철벽쬬", "price": "13,000원", "price_num": 13000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 97, "num": "097", "name": "쬬르디 인형뽑기 아크릴키링", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 98, "num": "098", "name": "썸머홀리데이 투명우산_라이언", "price": "14,000원", "price_num": 14000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 99, "num": "099", "name": "CHOONHOUSE 쿠션 거울_춘식이", "price": "25,000원", "price_num": 25000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 100, "num": "100", "name": "프로포즈 팔찌인형_춘식이", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 101, "num": "101", "name": "김다예X프렌즈 투명스티커_라이언&춘식이", "price": "3,000원", "price_num": 3000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 102, "num": "102", "name": "트윙클스타 스탠딩 자석판 인형_리틀튜브", "price": "18,000원", "price_num": 18000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 103, "num": "103", "name": "별별춘식 PVC 반짝이 키링 마스터", "price": "8,500원", "price_num": 8500, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 104, "num": "104", "name": "Friendzoo 판다 바디 필로우_리틀어피치", "price": "49,000원", "price_num": 49000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 105, "num": "105", "name": "포슬인형 코스튬-썸머 튜브", "price": "11,900원", "price_num": 11900, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 106, "num": "106", "name": "골골즈 미니 헤어핀 4P_박밤이", "price": "10,000원", "price_num": 10000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 107, "num": "107", "name": "포근한 플란넬 담요_리틀어피치", "price": "17,900원", "price_num": 17900, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 108, "num": "108", "name": "포근한 플란넬 담요_리틀라이언", "price": "17,900원", "price_num": 17900, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 109, "num": "109", "name": "골골즈 미니키링인형 파자마_박밤이", "price": "14,000원", "price_num": 14000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 110, "num": "110", "name": "쬬르디 미니피규어키링_어쩔쬬", "price": "10,000원", "price_num": 10000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 111, "num": "111", "name": "오늘부터갓생 포토키링 아자아자_춘식이", "price": "9,000원", "price_num": 9000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 112, "num": "112", "name": "쬬르디 미니파우치_말티쬬", "price": "13,000원", "price_num": 13000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 113, "num": "113", "name": "쬬르디 미니피규어키링_긍정쬬", "price": "10,000원", "price_num": 10000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 114, "num": "114", "name": "행운만땅 송풍구 피규어_춘식이", "price": "13,000원", "price_num": 13000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 115, "num": "115", "name": "쬬르디 차량용 목쿠션_말티쬬", "price": "14,000원", "price_num": 14000, "status": "배부중", "stock": 10, "category": "차량·이동"}, {"id": 116, "num": "116", "name": "쬬르디 리버서블 키링인형 죠르디_뽀짝쬬", "price": "12,000원", "price_num": 12000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 117, "num": "117", "name": "춘식버스 미니파우치키링 신입생_춘식이", "price": "19,000원", "price_num": 19000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 118, "num": "118", "name": "굿바이윙윙 향기나는 인형_춘식이", "price": "16,000원", "price_num": 16000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 119, "num": "119", "name": "골골즈 투명스티커 핑크_골골즈", "price": "2,500원", "price_num": 2500, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 120, "num": "120", "name": "롱 멀티 도어가드 4P", "price": "18,000원", "price_num": 18000, "status": "배부중", "stock": 10, "category": "차량·이동"}, {"id": 121, "num": "121", "name": "오늘부터갓생 포토키링 넌예뻐_라&어", "price": "9,000원", "price_num": 9000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 122, "num": "122", "name": "오늘부터갓생 포토키링 유캔두잇_춘식이", "price": "9,000원", "price_num": 9000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 123, "num": "123", "name": "쬬르디 미니피규어키링_복어쬬", "price": "10,000원", "price_num": 10000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 124, "num": "124", "name": "쬬르디 미니피규어키링_철벽쬬", "price": "10,000원", "price_num": 10000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 125, "num": "125", "name": "조이스틱 듀얼 주차번호판_춘식이", "price": "25,000원", "price_num": 25000, "status": "배부중", "stock": 10, "category": "차량·이동"}, {"id": 126, "num": "126", "name": "쬬르디 차량용 목쿠션_할미쬬", "price": "14,000원", "price_num": 14000, "status": "배부중", "stock": 10, "category": "차량·이동"}, {"id": 127, "num": "127", "name": "트윙클스타 스탠딩 자석판 인형_리틀라이언", "price": "18,000원", "price_num": 18000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 128, "num": "128", "name": "쬬르디 안심 톡톡 주차번호판_말티쬬", "price": "22,000원", "price_num": 22000, "status": "배부중", "stock": 10, "category": "차량·이동"}, {"id": 129, "num": "129", "name": "춘식버스 무빙키링", "price": "18,000원", "price_num": 18000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 130, "num": "130", "name": "쬬르디 미니피규어키링_뽀짝쬬", "price": "10,000원", "price_num": 10000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 131, "num": "131", "name": "도도도춘식이 워터볼 횃불_춘식이", "price": "17,000원", "price_num": 17000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 132, "num": "132", "name": "세비지 스트랩 키링(핸드폰)_춘식이", "price": "12,000원", "price_num": 12000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 133, "num": "133", "name": "세비지 스트랩 키링(가방)_춘식이", "price": "12,000원", "price_num": 12000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 134, "num": "134", "name": "세비지 스트랩 키링(카메라)_춘식이", "price": "12,000원", "price_num": 12000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 135, "num": "135", "name": "김다예X카카오프렌즈 카드(쇼파)_라이언&춘식이", "price": "2,500원", "price_num": 2500, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 136, "num": "136", "name": "프렌즈in제주 쬬르디 마그넷_누구시쬬", "price": "14,000원", "price_num": 14000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 137, "num": "137", "name": "프렌즈in제주 쬬르디 마그넷_할미쬬", "price": "14,000원", "price_num": 14000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 138, "num": "138", "name": "프렌즈in제주 쬬르디 마그넷_복어쬬", "price": "14,000원", "price_num": 14000, "status": "배부중", "stock": 10, "category": "문구·소품"}, {"id": 139, "num": "139", "name": "춘식버스 퍼레이드 브릭피규어 망나니_춘식이", "price": "29,000원", "price_num": 29000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 140, "num": "140", "name": "힙스터 거북이 후크_춘식이", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 141, "num": "141", "name": "쬬르디 미니피규어키링_말티쬬", "price": "10,000원", "price_num": 10000, "status": "배부중", "stock": 10, "category": "키링·참"}, {"id": 142, "num": "142", "name": "프렌즈in제주 랜덤피규어_쬬르디", "price": "15,000원", "price_num": 15000, "status": "배부중", "stock": 10, "category": "인형·피규어"}, {"id": 143, "num": "143", "name": "멀티 타이머_춘식이", "price": "21,000원", "price_num": 21000, "status": "배부중", "stock": 10, "category": "생활·패션"}, {"id": 144, "num": "144", "name": "냥냥특집 츈켄슈타인 퍼스널컬러 랜덤 액정 클리너_춘식이 (9종)", "price": "1,900원", "price_num": 1900, "status": "배부중", "stock": 10, "category": "생활·패션"}];
-// "카카오리스트.xlsx"의 "창고구역설정" 시트를 그대로 옮긴 실제 창고 평면도.
-// 왼쪽→오른쪽 열(라/다/나/가 = D/C/B/A), 위→아래 행(가행/나행/다행). 다행은 가열(A) 자리에만 구역이 있음.
-const WAREHOUSE_LAYOUT = {
-  columns: ['라','다','나','가'],
-  rows: [
-    { label: '가행', cells: ['D_가','C_가','B_가','A_가'] },
-    { label: '나행', cells: ['D_나','C_나','B_나','A_나'] },
-    { label: '다행', cells: [null, null, null, 'A_다'] }
-  ],
-  doorAfterCol: 1 // 다열과 나열 사이에 창고 문(입구)이 있음
-};
-const PRODUCT_ZONE = {"005": "A_다", "006": "A_다", "007": "A_다", "010": "B_나", "011": "A_다", "012": "A_나", "013": "B_나", "014": "A_다", "015": "A_나", "016": "B_나", "017": "A_나", "018": "A_다", "019": "A_다", "020": "A_나", "021": "B_나", "022": "D_나", "023": "A_나", "025": "A_다", "026": "A_나", "027": "A_나", "028": "A_나", "029": "A_다", "030": "B_나", "031": "A_나", "032": "B_나", "033": "A_가", "034": "B_가", "035": "B_나", "036": "A_다", "037": "A_다", "038": "B_나", "039": "B_나", "040": "A_가", "041": "A_다", "042": "A_나", "043": "A_다", "044": "B_나", "045": "A_나", "046": "B_가", "047": "B_가", "048": "B_가", "049": "A_가", "050": "A_가", "051": "B_나", "052": "B_나", "053": "B_가", "054": "B_가", "055": "A_나", "056": "D_나", "057": "A_다", "058": "B_가", "059": "A_다", "060": "A_다", "063": "A_다", "064": "B_나", "065": "B_나", "067": "B_가", "068": "B_나", "070": "A_다", "071": "A_다", "072": "B_가", "074": "B_나", "075": "A_다", "077": "B_나", "078": "A_다", "079": "B_가", "081": "B_나", "082": "D_가", "083": "D_나", "084": "D_나", "086": "C_나", "087": "D_나", "088": "D_나", "089": "D_나", "090": "D_나", "091": "C_나", "092": "C_나", "094": "C_나", "096": "D_나", "097": "D_나", "098": "D_가", "099": "D_가", "100": "B_가", "102": "A_가", "103": "D_나", "104": "A_가", "105": "B_가", "106": "A_가", "107": "C_나", "108": "B_가", "109": "B_가", "110": "A_가", "111": "B_가", "112": "D_나", "113": "A_가", "114": "D_나", "115": "B_가", "116": "A_가", "117": "B_가", "119": "B_나", "120": "C_가", "121": "C_나", "122": "D_나", "123": "C_나", "124": "B_나", "125": "D_가", "126": "B_나", "127": "B_나", "128": "C_가", "131": "B_나", "132": "B_나", "133": "B_나", "134": "B_나", "135": "B_나", "136": "B_나", "137": "C_가", "138": "B_나", "139": "B_나", "140": "D_나", "141": "B_나", "142": "B_나", "143": "B_나", "144": "B_나"};
 
 // ── STATE ──
 let cart = {};
@@ -665,15 +620,6 @@ async function loadRequestsFromAPI(force) {
   } catch(e) { console.warn('신청 API 실패'); }
 }
 function getRequests() { return reqCache; }
-// 서버에 저장된 창고 위치(제품번호→구역)를 불러와서 기본 PRODUCT_ZONE 위에 덮어쓴다.
-// 관리자가 창고지도에서 위치를 옮기거나 새로 지정하면 여기로 저장되므로, 항상 이 값이
-// 엑셀에서 가져온 초기 배치보다 우선한다.
-async function loadProductZonesFromAPI() {
-  try {
-    const res = await api('getProductZones');
-    if (res.ok && res.zones) Object.assign(PRODUCT_ZONE, res.zones);
-  } catch(e) { console.warn('창고구역 API 실패, 기본 데이터 사용'); }
-}
 
 // ── AUTH ──
 async function sha256(str) {
@@ -799,6 +745,7 @@ async function doRegister() {
   const pw2=document.getElementById('reg-pw2').value;
   if (!name) { showErr('이름을 입력해주세요.'); return; }
   if (!email||!email.includes('@')) { showErr('올바른 이메일을 입력해주세요.'); return; }
+  if (!/^[^\s@]+@worldvision\.or\.kr$/i.test(email)) { showErr('worldvision.or.kr 메일로만 가입할 수 있습니다.'); return; }
   if (pw.length<6) { showErr('비밀번호는 6자 이상이어야 합니다.'); return; }
   if (pw!==pw2) { showErr('비밀번호가 일치하지 않습니다.'); return; }
   setLoading('btn-do-register', true, '처리 중...');
@@ -838,7 +785,7 @@ async function enterSystem(user) {
   await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
   updateCartBadge(); updateStats();
   startAutoRefresh();
-  showPage(user.role==='admin' ? 'admin' : 'catalog');
+  showPage(user.role==='admin' ? 'admin' : 'catalog', true); // 바로 위에서 이미 불러왔으므로 관리자 화면에서 재조회하지 않음
   notifyPendingReportsIfAny();
 }
 // 로그인한 본인 명의로 배부완료됐지만 아직 결과보고를 등록하지 않은 건이 있으면 안내
@@ -856,8 +803,8 @@ function notifyPendingReportsIfAny() {
 function openManual() {
   const isAdmin = currentUser?.role === 'admin';
   const file = isAdmin
-    ? '카카오프렌즈_GIK배분시스템_사용설명서_관리자용.html'
-    : '카카오프렌즈_GIK배분시스템_사용설명서_직원용.html';
+    ? '카카오배부시스템/카카오프렌즈_GIK배분시스템_사용설명서_관리자용.html'
+    : '카카오배부시스템/카카오프렌즈_GIK배분시스템_사용설명서_직원용.html';
   window.open(file, '_blank');
 }
 function doLogout() {
@@ -873,16 +820,15 @@ function showErr(msg) {
 }
 
 // ── PAGES ──
-function showPage(id) {
+function showPage(id, dataAlreadyLoaded) {
   document.querySelectorAll('.page').forEach(p=>{p.classList.remove('active');p.style.display='';});
   document.querySelectorAll('nav button[id^=btn-]').forEach(b=>b.classList.remove('active'));
   document.getElementById('page-'+id).classList.add('active');
   document.getElementById('btn-'+id)?.classList.add('active');
   if (id==='catalog') renderCatalog();
   if (id==='myreq') loadRequestsFromAPI().then(()=>renderMyRequests());
-  if (id==='admin') Promise.all([loadStockFromAPI(),loadRequestsFromAPI(),loadProductZonesFromAPI()]).then(()=>renderAdmin());
+  if (id==='admin') (dataAlreadyLoaded ? Promise.resolve() : Promise.all([loadStockFromAPI(),loadRequestsFromAPI()])).then(()=>renderAdmin());
   if (id==='feedback') loadFeedback();
-  if (id==='warehouse') Promise.all([loadStockFromAPI(), loadRequestsFromAPI(), loadProductZonesFromAPI()]).then(()=>renderWarehouseMap());
 }
 
 // ── CART ──
@@ -1456,7 +1402,7 @@ function renderAdminRequests() {
     <td style="font-size:12px">${(r.reason||'').substring(0,18)}${(r.reason||'').length>18?'…':''}</td>
     <td style="font-size:12px">${dateOnly(r.pickupDate)||'-'}</td>
     <td style="font-size:12px">${dateOnly(r.useDate)||'-'}</td>
-    <td><a href="#" onclick="showDetail('${r.id}')" style="color:var(--blue)">${r.items.filter(i=>!i.cancelled).length}종 ${r.items.filter(i=>!i.cancelled).reduce((s,i)=>s+i.qty,0)}개 ▶</a></td>
+    <td><a href="#" onclick="showDetail('${r.id}');return false" style="color:var(--blue)">${r.items.filter(i=>!i.cancelled).length}종 ${r.items.filter(i=>!i.cancelled).reduce((s,i)=>s+i.qty,0)}개 ▶</a></td>
     <td><span class="status-badge ${r.status}">${statusLabel(r.status)}</span></td>
     <td>${r.status==='pending'
       ?`<button class="action-btn approve" onclick="handleRequest('${r.id}','approved')">✓ 승인</button><button class="action-btn reject" onclick="promptReject('${r.id}')">✗ 반려</button>`
@@ -1502,27 +1448,6 @@ async function saveReqSchedule(id) {
   } catch(e) { toast('❌ 서버 오류: '+e.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '💾 날짜 저장'; } }
 }
-// 인쇄용 피킹리스트에 넣을 창고지도 — 화면의 창고지도와 같은 배치를 별도 창(document)에
-// 그대로 그려서 넣는다. highlightZones에 담긴 구역만 진하게 표시해서 찾기 쉽게 한다.
-function buildWarehouseMapPrintHtml(highlightZones) {
-  const cell = (zone) => {
-    if (!zone) return `<div></div>`;
-    const hl = highlightZones && highlightZones.has(zone);
-    return `<div style="border:2px solid #22252A;border-radius:8px;padding:10px 4px;text-align:center;background:${hl?'#FF6B1A':'#ffd9b8'};color:${hl?'#fff':'#22252A'};font-weight:800;font-size:13px">${zone}</div>`;
-  };
-  const pillar = `<div style="display:flex;align-items:center;justify-content:center;font-size:9px;color:#999;background:repeating-linear-gradient(45deg,#ddd,#ddd 3px,#eee 3px,#eee 6px);border-radius:4px">기둥</div>`;
-  const colTemplate = '36px 1fr 20px 1fr 20px 1fr 20px 1fr';
-  const headerRow = `<div style="display:grid;grid-template-columns:${colTemplate};gap:4px;margin-bottom:4px">
-    <div></div>${WAREHOUSE_LAYOUT.columns.map((c,ci)=>`<div style="grid-column:${2+ci*2};text-align:center;font-size:11px;font-weight:700">${c}열</div>`).join('')}
-  </div>`;
-  const rowsHtml = WAREHOUSE_LAYOUT.rows.map(row => {
-    const cells = row.cells.map((zone, ci) => cell(zone) + (ci < row.cells.length-1 ? pillar : '')).join('');
-    return `<div style="display:grid;grid-template-columns:${colTemplate};gap:4px;align-items:stretch;margin-bottom:4px">
-      <div style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${row.label}</div>${cells}
-    </div>`;
-  }).join('');
-  return `${headerRow}${rowsHtml}<div style="text-align:center;font-size:11px;color:#777;margin-top:6px">🚪 창고 문(입구)</div>`;
-}
 function generatePickList() {
   const reqs = getRequests().filter(r => selectedReqIds.has(String(r.id)));
   if (reqs.length === 0) { toast('❌ 선택된 신청이 없습니다'); return; }
@@ -1534,17 +1459,15 @@ function generatePickList() {
       agg[key] = (agg[key] || 0) + i.qty;
     });
   });
-  // 위치(구역) 기준으로 묶어서 정렬 — 같은 구역 물건을 한 번에 챙길 수 있게
-  const byZoneThenNum = (a,b) => (a.zone||'미지정').localeCompare(b.zone||'미지정') || a.num.localeCompare(b.num);
+  const byNum = (a,b) => a.num.localeCompare(b.num);
   const totalRows = Object.entries(agg)
-    .map(([key, qty]) => { const [num, name] = key.split('|'); return { num, name, qty, zone: PRODUCT_ZONE[num] || '' }; })
-    .sort(byZoneThenNum);
-  const highlightZones = new Set(totalRows.map(r => r.zone).filter(Boolean));
+    .map(([key, qty]) => { const [num, name] = key.split('|'); return { num, name, qty }; })
+    .sort(byNum);
 
   const personSections = reqs.map(r => {
     const items = r.items.filter(i => !i.cancelled)
-      .map(i => ({ num: String(i.num).padStart(3,'0'), name: i.name, qty: i.qty, zone: PRODUCT_ZONE[String(i.num).padStart(3,'0')] || '' }))
-      .sort(byZoneThenNum);
+      .map(i => ({ num: String(i.num).padStart(3,'0'), name: i.name, qty: i.qty }))
+      .sort(byNum);
     const qtySum = items.reduce((s,i)=>s+i.qty, 0);
     return `
     <div class="person-block">
@@ -1553,8 +1476,8 @@ function generatePickList() {
         <span class="muted"> · 연락처 ${r.contact||'-'}</span>
         <span class="muted"> · ${items.length}종 ${qtySum.toLocaleString()}개</span>
       </div>
-      <table><thead><tr><th style="width:70px">번호</th><th>제품명</th><th style="width:70px">위치</th><th style="width:90px;text-align:right">수량</th></tr></thead>
-      <tbody>${items.map(i=>`<tr><td>${i.num}</td><td>${i.name}</td><td class="zone">${i.zone||'-'}</td><td class="qty">${i.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
+      <table><thead><tr><th style="width:70px">번호</th><th>제품명</th><th style="width:90px;text-align:right">수량</th></tr></thead>
+      <tbody>${items.map(i=>`<tr><td>${i.num}</td><td>${i.name}</td><td class="qty">${i.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
     </div>`;
   }).join('');
 
@@ -1571,22 +1494,18 @@ function generatePickList() {
       th,td{border:1px solid #EEE9E2;padding:9px 12px;font-size:14px;text-align:left}
       th{background:#22252A;color:#F4761F}
       td.qty{text-align:right;font-weight:700}
-      td.zone{font-weight:700;color:#B8390C}
       .person-block{margin-bottom:22px;page-break-inside:avoid}
       .person-head{margin-bottom:8px;font-size:14px}
-      .map-wrap{margin-top:14px;padding:16px;border:1.5px solid #EEE9E2;border-radius:12px;page-break-inside:avoid}
       .print-btn{margin-top:24px;padding:10px 22px;background:#F4761F;color:#FFFFFF;border:none;border-radius:999px;font-weight:700;font-size:14px;cursor:pointer}
       @page { size: A4; margin: 16mm 14mm; }
       @media print { .print-btn{display:none} }
     </style></head><body>
     <h1>📦 창고 피킹리스트</h1>
     <div class="sub">출력일: ${today} · 선택 신청 ${reqs.length}건 · 총 ${totalRows.length}종 ${totalRows.reduce((s,r)=>s+r.qty,0).toLocaleString()}개</div>
-    <table><thead><tr><th style="width:70px">번호</th><th>제품명</th><th style="width:70px">위치</th><th style="width:90px;text-align:right">수량</th></tr></thead>
-    <tbody>${totalRows.map(r=>`<tr><td>${r.num}</td><td>${r.name}</td><td class="zone">${r.zone||'-'}</td><td class="qty">${r.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
+    <table><thead><tr><th style="width:70px">번호</th><th>제품명</th><th style="width:90px;text-align:right">수량</th></tr></thead>
+    <tbody>${totalRows.map(r=>`<tr><td>${r.num}</td><td>${r.name}</td><td class="qty">${r.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
     <h2>👤 신청인별 내역</h2>
     ${personSections}
-    <h2>🗺️ 창고 지도 (주황색 구역에서 찾으세요)</h2>
-    <div class="map-wrap">${buildWarehouseMapPrintHtml(highlightZones)}</div>
     <button class="print-btn" onclick="window.print()">🖨️ 인쇄</button>
     </body></html>`);
   win.document.close();
@@ -1604,8 +1523,6 @@ async function refreshReportSheet() {
   if (btn) { btn.disabled=false; btn.textContent='📊 배부현황 시트 새로고침'; }
 }
 // 제품별로 "신청만 되고 아직 배부 안 된 수량"과 "배부완료된 수량"을 나눠서 집계.
-// 재고관리 표와 창고지도가 공통으로 쓴다 — 창고지도는 신청재고(아직 현장에 있음)는
-// 빼면 안 되고 배부재고(실제로 나간 것)만 빼야 하므로 이 구분이 꼭 필요하다.
 function computeReqDistMaps() {
   const requestedMap = {};   // 신청됐지만 미배부(아직 현장에 있음)
   const distributedMap = {}; // 배부완료(반품 반영된 실배부수량 기준, 현장에서 나간 것)
@@ -2032,7 +1949,7 @@ function renderAdminHistory() {
     <td><b>${r.dept||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
     <td><b>${r.name||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.contact||'-'}</span></td>
     <td style="font-size:12px">${r.reason||'-'}</td>
-    <td><a href="#" onclick="showDetail('${r.id}')" style="color:var(--blue)">${active.length}종 ${reqQty.toLocaleString()}개 ▶</a></td>
+    <td><a href="#" onclick="showDetail('${r.id}');return false" style="color:var(--blue)">${active.length}종 ${reqQty.toLocaleString()}개 ▶</a></td>
     <td>${r.status==='distributed' ? `<b style="color:var(--green)">${distActive.length}종 ${distQty.toLocaleString()}개</b>` : '-'}</td>
     <td>
         <span class="status-badge ${r.status}">${cat==='reported'?'결과보고완료':statusLabel(r.status)}</span>
@@ -2588,170 +2505,6 @@ function downloadMyReqExcel() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-}
-
-// ── 창고지도 ──
-// 그리드 배치: 1열=행 라벨, 2/4/6/8열=구역(라·다·나·가), 3/5/7열=기둥.
-// WAREHOUSE_LAYOUT.rows[r].cells[ci] → grid-column = 2 + ci*2
-let whHighlightZones = null; // 강조할 구역 Set, 없으면 null
-
-// 창고지도는 "지금 현장(창고)에 실제로 몇 개가 있는지"를 보여줘야 한다.
-// getStock()(=현재재고)은 신청만 되고 아직 안 나간 물량까지 미리 빼놓은 값이라
-// (재고는 신청 시점에 차감됨) 여기엔 안 맞는다 — 신청됐지만 미배부인 건 아직
-// 현장에 그대로 있으니, 실제로 나간(배부완료된) 수량만 원래재고에서 빼야 한다.
-function whZoneItems(zone, distributedMap) {
-  distributedMap = distributedMap || computeReqDistMaps().distributedMap;
-  return PRODUCTS
-    .filter(p => PRODUCT_ZONE[p.num] === zone)
-    .map(p => ({
-      num: p.num, name: p.name,
-      qty: Math.max(0, getOriginalStock(p.num) - (distributedMap[p.num] || 0))
-    }))
-    .sort((a,b) => a.name.localeCompare(b.name, 'ko'));
-}
-function whZoneTotal(zone, distributedMap) {
-  return whZoneItems(zone, distributedMap).reduce((s,i) => s + (Number(i.qty) || 0), 0);
-}
-function renderWarehouseMap() {
-  const el = document.getElementById('warehouse-map');
-  if (!el) return;
-
-  const { distributedMap } = computeReqDistMaps();
-  const rowCount = WAREHOUSE_LAYOUT.rows.length;
-  const cellNodes = [];
-
-  WAREHOUSE_LAYOUT.rows.forEach((row, ri) => {
-    cellNodes.push(`<div class="wh-row-label" style="grid-column:1;grid-row:${ri+1}">${row.label}</div>`);
-    row.cells.forEach((zone, ci) => {
-      const col = 2 + ci * 2;
-      if (!zone) {
-        cellNodes.push(`<div style="grid-column:${col};grid-row:${ri+1}"></div>`);
-        return;
-      }
-      const items = whZoneItems(zone, distributedMap);
-      const total = items.reduce((s,i) => s + (Number(i.qty) || 0), 0);
-      const highlighted = whHighlightZones && whHighlightZones.has(zone);
-      cellNodes.push(`<div class="wh-zone${highlighted?' wh-zone-highlight':''}" style="grid-column:${col};grid-row:${ri+1}" onclick="showZoneDetail('${zone}')">
-        <div class="wh-zone-code">${zone}</div>
-        <div class="wh-zone-count">${total.toLocaleString()}개</div>
-        <div class="wh-zone-species">${items.length}종</div>
-      </div>`);
-      // 기둥 (구역 사이, 마지막 열 다음엔 없음)
-      if (ci < row.cells.length - 1) {
-        cellNodes.push(`<div class="wh-pillar" style="grid-column:${col+1};grid-row:${ri+1}">기둥</div>`);
-      }
-    });
-  });
-
-  el.innerHTML = `
-    <div class="wh-col-headers">
-      ${WAREHOUSE_LAYOUT.columns.map((c,ci)=>`<div class="wh-col-head" style="grid-column:${2+ci*2}">${c}열</div>`).join('')}
-    </div>
-    <div class="wh-grid" style="grid-template-rows:repeat(${rowCount},1fr)">${cellNodes.join('')}</div>
-    <div class="wh-door-row">🚪 창고 문(입구)</div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px">
-      <span>◀ 창고 외벽</span><span>창고 외벽 ▶</span>
-    </div>`;
-
-  const unassigned = PRODUCTS.filter(p => !PRODUCT_ZONE[p.num]);
-  const unassignedEl = document.getElementById('warehouse-unassigned');
-  if (unassignedEl) {
-    const isAdmin = currentUser?.role === 'admin';
-    unassignedEl.innerHTML = unassigned.length ? `
-      <div style="margin-top:20px;padding:12px 14px;background:var(--card);border-radius:10px">
-        <div style="font-size:13px;font-weight:700;color:var(--muted);margin-bottom:6px">📌 아직 창고 위치가 지정되지 않은 제품 (${unassigned.length}종)</div>
-        ${isAdmin ? `
-        <div style="display:flex;flex-wrap:wrap;gap:6px">
-          ${unassigned.map(p=>`<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid var(--border);border-radius:14px;padding:3px 4px 3px 10px;font-size:12px">
-            ${p.name}
-            <button onclick="moveProductZone('${p.num}','${p.name.replace(/'/g,"\\'")}','')" style="font-size:11px;padding:2px 8px;border:none;border-radius:10px;background:var(--kakao);color:var(--on-primary);cursor:pointer">📍 지정</button>
-          </span>`).join('')}
-        </div>` : `<div style="font-size:12px;color:var(--muted)">${unassigned.map(p=>p.name).join(', ')}</div>`}
-      </div>` : '';
-  }
-}
-function showZoneDetail(zone) {
-  const items = whZoneItems(zone);
-  const total = items.reduce((s,i) => s + (Number(i.qty) || 0), 0);
-  const isAdmin = currentUser?.role === 'admin';
-  document.getElementById('modal-title').textContent = `📦 구역 ${zone} 상세`;
-  document.getElementById('modal-body').innerHTML = items.length ? `
-    <table style="font-size:13px;width:100%">
-      <thead><tr><th>제품번호</th><th>제품명</th><th style="text-align:right">현재 재고</th>${isAdmin?'<th></th>':''}</tr></thead>
-      <tbody>${items.map(i => `<tr>
-        <td>${i.num}</td><td>${i.name}</td>
-        <td style="text-align:right;font-weight:700">${(Number(i.qty)||0).toLocaleString()}개</td>
-        ${isAdmin?`<td style="text-align:right"><button onclick="moveProductZone('${i.num}','${i.name.replace(/'/g,"\\'")}','${zone}')" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;white-space:nowrap">📍 이동</button></td>`:''}
-      </tr>`).join('')}</tbody>
-    </table>
-    <div style="text-align:right;margin-top:10px;font-weight:700">합계 ${total.toLocaleString()}개</div>
-  ` : '<div class="empty"><div class="emoji">📭</div><p>이 구역에 배치된 제품이 없습니다</p></div>';
-  document.getElementById('modal-confirm').textContent = '닫기';
-  document.getElementById('modal-confirm').onclick = closeModal;
-  document.querySelector('.btn-cancel').style.display = 'none';
-  document.getElementById('modal-overlay').classList.add('open');
-}
-// 관리자가 제품의 창고 위치를 옮기거나(기존 구역 있음) 새로 지정(구역 없음)할 때 사용
-function moveProductZone(num, name, currentZone) {
-  if (currentUser?.role !== 'admin') return;
-  const allZones = WAREHOUSE_LAYOUT.rows.flatMap(r => r.cells).filter(Boolean);
-  const input = prompt(`"${name}"의 새 구역을 입력하세요.\n\n사용 가능한 구역: ${allZones.join(', ')}`, currentZone || '');
-  if (input === null) return;
-  const newZone = input.trim();
-  if (!newZone) { toast('❌ 구역을 입력해주세요'); return; }
-  if (!allZones.includes(newZone)) { toast('❌ 존재하지 않는 구역입니다: ' + newZone); return; }
-  saveProductZone(num, newZone);
-}
-async function saveProductZone(num, newZone) {
-  try {
-    const res = await api('setProductZone', { num, zone: newZone, adminName: currentUser?.name || '' });
-    if (!res.ok) { toast('❌ 저장 실패: ' + res.error); return; }
-    PRODUCT_ZONE[num] = newZone;
-    toast(`✅ 구역이 ${newZone}(으)로 저장됐습니다`);
-    closeModal();
-    renderWarehouseMap();
-  } catch(e) { toast('❌ 서버 오류: ' + e.message); }
-}
-// 로그인한 유저 본인의 활성 신청(취소 제외) 항목들이 어느 구역에 있는지 지도에서 강조 표시
-function findMyItemsOnMap() {
-  const myReqs = getRequests().filter(r => normName(r.name) === normName(currentUser.name));
-  const found = []; // { num, name, zone }
-  const unzoned = [];
-  const seen = new Set();
-  myReqs.forEach(r => {
-    if (r.status === 'cancelled' || r.status === 'rejected') return;
-    (r.items || []).forEach(item => {
-      if (item.cancelled || item.distributed) return; // 이미 받은 물품은 찾을 필요 없음
-      const num = String(item.num).padStart(3, '0');
-      if (seen.has(num)) return;
-      seen.add(num);
-      const zone = PRODUCT_ZONE[num];
-      if (zone) found.push({ num, name: item.name, zone });
-      else unzoned.push({ num, name: item.name });
-    });
-  });
-
-  const resultEl = document.getElementById('warehouse-find-result');
-  if (found.length === 0 && unzoned.length === 0) {
-    whHighlightZones = null;
-    resultEl.innerHTML = '<div class="info-box" style="background:#F0F4FF;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px">아직 배부 대기 중인 신청 물품이 없습니다.</div>';
-  } else {
-    whHighlightZones = new Set(found.map(f => f.zone));
-    const list = found.map(f => `<span style="display:inline-block;background:#FFF3CD;color:#856404;padding:3px 10px;border-radius:12px;font-size:12px;margin:3px 4px 0 0">${f.name} → <b>${f.zone}</b></span>`).join('');
-    const unzonedNote = unzoned.length ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">⚠️ 위치 미지정: ${unzoned.map(u=>u.name).join(', ')}</div>` : '';
-    resultEl.innerHTML = `<div style="background:#FFF9E6;border:1.5px solid var(--kakao);padding:10px 14px;border-radius:8px;margin-bottom:12px">
-      <div style="font-size:12px;font-weight:700;color:var(--brown);margin-bottom:6px">📍 내 신청 물품 위치 (지도에서 노란 테두리로 표시됨)</div>
-      ${list}${unzonedNote}
-    </div>`;
-  }
-  document.getElementById('wh-clear-btn').style.display = '';
-  renderWarehouseMap();
-}
-function clearWarehouseHighlight() {
-  whHighlightZones = null;
-  document.getElementById('warehouse-find-result').innerHTML = '';
-  document.getElementById('wh-clear-btn').style.display = 'none';
-  renderWarehouseMap();
 }
 
 // 관리자 페이지 자동 갱신 (45초, 브라우저 탭이 보일 때만)
