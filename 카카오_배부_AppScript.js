@@ -1268,7 +1268,7 @@ function submitRequest({ dept, team, name, contact, email, reason, pickupDate, u
 
 function submitRequest_({ dept, team, name, contact, email, reason, pickupDate, useDate, items }) {
   // ── 재고 사전 검증 (서버에서 실시간 확인) ──────────────────
-  const stockResult = getStock();
+  const stockResult = getStock({ fresh: true });
   const blocked = [];
   const insufficient = [];
   items.forEach(item => {
@@ -1622,11 +1622,15 @@ function sendNotificationEmail(to, name, dept, team, reason, items, status, admi
 // D열이 비어있으면 C열을 원래재고로 취급
 const STOCK_CACHE_KEY = 'stockCacheV1';
 const STOCK_CACHE_TTL_SEC = 20;
-function getStock() {
-  try {
-    const hit = CacheService.getScriptCache().get(STOCK_CACHE_KEY);
-    if (hit) return JSON.parse(hit);
-  } catch (e) {}
+// 화면 표시용은 짧은 캐시를 쓰지만, 신청·병합처럼 재고를 검증하고 차감하는 서버 로직은
+// 반드시 { fresh: true }로 시트를 직접 읽어야 한다(캐시가 낡았으면 초과 신청이 통과할 수 있음).
+function getStock(opts) {
+  if (!(opts && opts.fresh)) {
+    try {
+      const hit = CacheService.getScriptCache().get(STOCK_CACHE_KEY);
+      if (hit) return JSON.parse(hit);
+    } catch (e) {}
+  }
   const rows = sheet(SHEET_STK).getDataRange().getValues().slice(1);
   const stock = {};
   rows.forEach(r => {
@@ -1937,7 +1941,7 @@ function createDeferredRequest({ dept, team, name, contact, email, reason, origi
 // ── 신청 병합 ────────────────────────────────────────────────
 // 수취예정일·사용예정일이 같은 기존 신청에 새 항목들을 합쳐 넣는다.
 function mergeIntoRequest({ existingId, items }) {
-  const stockResult = getStock();
+  const stockResult = getStock({ fresh: true });
   const blocked = [];
   const insufficient = [];
   items.forEach(item => {
@@ -2497,14 +2501,14 @@ function testDeductStock() {
   Logger.log('=== 재고 차감 테스트 시작 ===');
 
   // 차감 전
-  const before = getStock().stock['002'];
+  const before = getStock({ fresh: true }).stock['002'];
   Logger.log('차감 전 002번: ' + JSON.stringify(before));
 
   // 1개 차감
   adjustStock('002', -1);
 
   // 차감 후
-  const after = getStock().stock['002'];
+  const after = getStock({ fresh: true }).stock['002'];
   Logger.log('차감 후 002번: ' + JSON.stringify(after));
 
   if (JSON.stringify(before) === JSON.stringify(after)) {

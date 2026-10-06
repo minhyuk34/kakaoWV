@@ -563,17 +563,38 @@ function downloadSampleFile(kind) {
 
 // ── API ──
 const API_URL = 'https://script.google.com/macros/s/AKfycbwGofio8Ii0exwi_CitQWqLpiBRMkblngJliU5WzKKmpORBH5nhc6RIjqck2LgLG5ivpw/exec';
-async function api(action, data={}) {
+// 서버가 과부하일 때 POST가 처리되지 않고 doGet 응답({ok:true,msg:...})이나 오류 페이지로
+// 돌아오는 경우가 있다. 이걸 성공으로 믿으면 "신청 완료"로 보이는데 실제로는 저장이 안 되므로
+// 실패로 취급한다. 조회(read) 액션은 안전하니 자동 재시도하고, 데이터를 바꾸는 액션은
+// 중복 처리 위험이 있어 재시도하지 않는다(호출한 쪽에서 사용자에게 확인을 안내).
+const READ_ACTIONS = ['getRequests', 'getStock', 'getFeedback'];
+const API_PING_MSG = '카카오 배부시스템 API';
+function apiOnce(action, data) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', API_URL, true);
+    xhr.timeout = 120000;
     xhr.onload = () => {
-      try { resolve(JSON.parse(xhr.responseText)); }
-      catch(e) { reject(new Error('응답 파싱 오류: ' + xhr.responseText)); }
+      let res;
+      try { res = JSON.parse(xhr.responseText); }
+      catch(e) { reject(new Error('서버 응답이 올바르지 않습니다(일시적인 서버 문제)')); return; }
+      if (res && res.msg === API_PING_MSG) { reject(new Error('서버가 요청을 처리하지 못했습니다(일시적인 서버 문제)')); return; }
+      resolve(res);
     };
     xhr.onerror = () => reject(new Error('네트워크 오류'));
+    xhr.ontimeout = () => reject(new Error('서버 응답 시간 초과'));
     xhr.send(JSON.stringify({action, ...data}));
   });
+}
+async function api(action, data={}) {
+  const retries = READ_ACTIONS.includes(action) ? 2 : 0;
+  for (let attempt = 0; ; attempt++) {
+    try { return await apiOnce(action, data); }
+    catch(e) {
+      if (attempt >= retries) throw e;
+      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+    }
+  }
 }
 
 // ── DATA ──
@@ -1065,6 +1086,7 @@ async function submitRequest() {
       renderCatalog();
       return;
     }
+    if (!res.id) throw new Error('서버 응답에 신청번호가 없습니다');
 
     // 재고 즉시 차감
     items.forEach(item => {
@@ -1088,7 +1110,10 @@ async function submitRequest() {
     if (filters) filters.style.display = '';
     updateCartBadge(); renderCatalog(); updateStats(); updateMyReqBadge();
     showSubmitSuccess();
-  } catch(e) { toast('❌ 서버 오류: ' + e.message); }
+  } catch(e) {
+    // 저장됐는지 알 수 없는 상태 — 성공 화면으로 넘어가지 않고, 확인 방법을 분명히 알려준다
+    alert('⚠️ 신청이 저장됐는지 확인하지 못했습니다.\n\n(' + e.message + ')\n\n입력하신 내용과 장바구니는 그대로 남아 있습니다.\n[주문내역]에서 방금 신청이 보이는지 먼저 확인하고,\n없으면 잠시 후 다시 [배부요청하기]를 눌러주세요.');
+  }
   finally { btn.disabled = false; btn.textContent = '📦 배부요청하기'; }
 }
 
