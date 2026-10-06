@@ -567,7 +567,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbwGofio8Ii0exwi_CitQWqL
 // 돌아오는 경우가 있다. 이걸 성공으로 믿으면 "신청 완료"로 보이는데 실제로는 저장이 안 되므로
 // 실패로 취급한다. 조회(read) 액션은 안전하니 자동 재시도하고, 데이터를 바꾸는 액션은
 // 중복 처리 위험이 있어 재시도하지 않는다(호출한 쪽에서 사용자에게 확인을 안내).
-const READ_ACTIONS = ['getRequests', 'getStock', 'getFeedback'];
+const READ_ACTIONS = ['getRequests', 'getStock', 'getFeedback', 'login', 'findAccountByEmail']; // 같은 요청을 여러 번 보내도 결과가 바뀌지 않는 것들
 const API_PING_MSG = '카카오 배부시스템 API';
 function apiOnce(action, data) {
   return new Promise((resolve, reject) => {
@@ -592,6 +592,7 @@ async function api(action, data={}) {
     try { return await apiOnce(action, data); }
     catch(e) {
       if (attempt >= retries) throw e;
+      if (typeof api.onRetry === 'function') api.onRetry(attempt + 2, retries + 1); // 화면에 "재시도 중" 표시용
       await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
     }
   }
@@ -784,13 +785,14 @@ async function doLogin() {
   if (!name) { showErr('이름을 입력해주세요.'); return; }
   if (!pw)   { showErr('비밀번호를 입력해주세요.'); return; }
   setLoading('btn-do-login', true, '로그인 중...');
+  api.onRetry = (n, total) => setLoading('btn-do-login', true, `서버가 바빠 다시 시도 중… (${n}/${total})`);
   try {
     const hash = await sha256(pw);
     const res = await api('login', {name, hash});
     if (!res.ok) { showErr(res.error); return; }
     enterSystem({name:res.name, role:res.role, email:res.email});
-  } catch(e) { showErr('서버 연결 실패. 잠시 후 다시 시도해주세요.'); }
-  finally { setLoading('btn-do-login', false, '로그인'); }
+  } catch(e) { showErr('서버가 일시적으로 응답하지 않습니다. 1~2분 뒤 다시 시도해주세요. (' + e.message + ')'); }
+  finally { api.onRetry = null; setLoading('btn-do-login', false, '로그인'); }
 }
 function setLoading(id, on, text) {
   const el=document.getElementById(id); if(el){el.disabled=on;el.textContent=text;}
