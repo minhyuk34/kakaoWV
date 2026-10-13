@@ -2299,18 +2299,18 @@ function editDistributedQty({ id, idx, newQty, adminName }) {
       const productName = items[idx].name;
       const oldQty = Number(items[idx].distributedQty ?? items[idx].qty) || 0;
 
-      const prevExcess = Math.max(0, oldQty - reqQty);
-      const newExcess  = Math.max(0, newQty - reqQty);
-      const stockDelta = newExcess - prevExcess; // 양수면 재고 추가 차감, 음수면 복구
+      // 배부완료 항목은 실배부수량만큼 재고를 점유한다(syncStock과 같은 기준). 정정으로 수량이
+      // 줄면 그 차이만큼 재고 복구(+), 늘면 추가 차감(−). 신청수량 이내에서의 조정도 포함된다.
+      const stockDelta = oldQty - newQty;
 
       let newStock = currentStockOf(productNum);
       if (stockDelta !== 0) {
-        newStock = adjustStockAllowNegative(productNum, -stockDelta, {
+        newStock = adjustStockAllowNegative(productNum, stockDelta, {
           reqId: id, name: rows[i][4],
-          reason: `실배부수량 정정(${adminName || '관리자'}): ${productName} ${oldQty}→${newQty}` + (newExcess > 0 ? ` (초과분 ${newExcess})` : '')
+          reason: `실배부수량 정정(${adminName || '관리자'}): ${productName} ${oldQty}→${newQty}` +
+                  (newQty > reqQty ? ` (신청 ${reqQty} 대비 초과 ${newQty - reqQty})` : '')
         });
       } else {
-        // 재고 변동이 없는 정정(신청수량 이내에서의 조정)도 정정 사실 자체는 이력에 남긴다.
         logStockChange(
           { reqId: id, name: rows[i][4], reason: `실배부수량 정정(${adminName || '관리자'}): ${productName} ${oldQty}→${newQty}` },
           productNum, 0, newStock
@@ -2616,21 +2616,25 @@ function distributeItems({ id, distributedIndices, distributeDate, distributeMet
         if (d) item.distributeDate   = d;
         if (m) item.distributeMethod = m;
 
-        // 실제 배부수량 기록 — 관리자는 신청수량을 초과해서 지정할 수 있다(예: 신청 10개인데
-        // 실제로는 15개 지급). 신청수량만큼은 신청 시점에 이미 재고에서 빠져있으므로,
-        // 초과분만큼만 지금 추가로 차감하고 재고가 0 이하가 되면 경고 대상으로 기록한다.
-        let distQty = (qtyMap && qtyMap[idx] !== undefined) ? Number(qtyMap[idx]) : item.qty;
+        // 실제 배부수량 기록 — 신청수량보다 적게도, 많게도 지정할 수 있다.
+        // 재고는 신청 시점에 신청수량(item.qty)만큼 이미 차감돼 있으므로(이미 배부된 항목을 다시
+        // 저장하는 경우엔 직전에 반영된 실배부수량만큼), "예약돼 있던 양 − 이번 실배부수량"만큼만
+        // 지금 재고에 반영한다. 적게 나갔으면 남는 만큼 복구(+), 많이 나갔으면 추가 차감(−).
+        // 이 값이 syncStock()의 계산(배부완료 항목은 실배부수량 기준)과 같은 기준이라, 저장 직후
+        // 재고 화면이 재계산 결과와 어긋나지 않는다. (예전에는 초과분만 반영하고 부족분은
+        // 반영하지 않아서, 100개 신청에 0개 배부로 저장해도 재고가 복구되지 않았다.)
+        const rawQty = (qtyMap && qtyMap[idx] !== undefined && qtyMap[idx] !== null && qtyMap[idx] !== '') ? Number(qtyMap[idx]) : item.qty;
+        let distQty = rawQty;
         if (isNaN(distQty) || distQty < 0) distQty = item.qty;
-        // 이미 배부돼 초과분이 반영된 항목을 다시 저장(재시도·중복 클릭)하면 초과분이 또 차감되므로,
-        // 이전에 반영된 초과분과의 차이만 재고에 반영한다.
-        const prevExcess = wasDistributed ? Math.max(0, (Number(item.distributedQty ?? item.qty) || 0) - item.qty) : 0;
-        const excessDelta = Math.max(0, distQty - item.qty) - prevExcess;
-        if (excessDelta !== 0) {
-          const newStock = adjustStockAllowNegative(item.num, -excessDelta, {
+        const reservedBefore = wasDistributed ? (Number(item.distributedQty ?? item.qty) || 0) : (Number(item.qty) || 0);
+        const stockDelta = reservedBefore - distQty;
+        if (stockDelta !== 0) {
+          const newStock = adjustStockAllowNegative(item.num, stockDelta, {
             reqId: id, name: rows[i][4],
-            reason: `신청수량 초과 배부(${adminName || '관리자'}): ${item.name} ${excessDelta > 0 ? '+' : ''}${excessDelta}(초과분)`
+            reason: `배부수량 반영(${adminName || '관리자'}): ${item.name} 신청 ${item.qty} → 배부 ${distQty}` +
+                    (stockDelta > 0 ? ` (미배부 ${stockDelta} 복구)` : ` (초과 ${-stockDelta} 추가차감)`)
           });
-          if (excessDelta > 0 && newStock !== null && newStock <= 0) {
+          if (stockDelta < 0 && newStock !== null && newStock <= 0) {
             stockWarnings.push({ productName: item.name, newStock });
           }
         }

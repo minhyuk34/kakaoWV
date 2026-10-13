@@ -2268,16 +2268,17 @@ async function returnItem(id, idx, maxQty, itemName) {
   } catch(e) { toast('❌ 서버 오류: ' + e.message); }
 }
 async function editDistQty(id, idx, currentQty, reqQty, itemName) {
-  // 신청수량(reqQty)을 초과해서 입력해도 된다 — 실제로 더 많이 나간 경우를 그대로
-  // 기록하기 위함. 신청수량 이내 조정은 재고에 영향 없고, 초과분은 재고에서 추가로
-  // 차감된다(이미 초과였다가 줄이면 그만큼 복구). 자세한 건 서버 쪽 주석 참고.
-  const input = prompt(`"${itemName}" 실제 배부수량을 입력하세요 (신청수량 참고: ${reqQty}개 · 이를 초과하면 초과분만큼 재고에서 추가로 차감됩니다)`, String(currentQty));
+  // 신청수량(reqQty)보다 많게도 적게도 입력할 수 있다. 재고는 실배부수량 기준으로 맞춰진다:
+  // 줄이면 그 차이만큼 재고가 복구되고, 늘리면 그만큼 추가로 차감된다. 자세한 건 서버 쪽 주석 참고.
+  const input = prompt(`"${itemName}" 실제 배부수량을 입력하세요 (신청수량 참고: ${reqQty}개 · 수량을 줄이면 차이만큼 재고가 복구되고, 늘리면 그만큼 재고에서 차감됩니다)`, String(currentQty));
   if (input === null) return;
   const qty = parseInt(input, 10);
   if (isNaN(qty) || qty < 0) { toast('❌ 올바른 수량을 입력하세요 (0 이상)'); return; }
   if (qty === currentQty) return;
-  const excessNote = qty > reqQty ? `\n⚠️ 신청수량(${reqQty}개)을 초과합니다 — 초과분 ${qty - reqQty}개는 재고에서 추가로 차감됩니다.` : '';
-  if (!confirm(`"${itemName}" 실배부수량을 ${currentQty}개 → ${qty}개로 정정합니다.${excessNote}`)) return;
+  const diff = qty - currentQty;
+  const stockNote = diff < 0 ? `\n재고가 ${-diff}개 복구됩니다.` : `\n재고에서 ${diff}개가 추가로 차감됩니다.`;
+  const excessNote = qty > reqQty ? `\n⚠️ 신청수량(${reqQty}개)을 초과합니다.` : '';
+  if (!confirm(`"${itemName}" 실배부수량을 ${currentQty}개 → ${qty}개로 정정합니다.${stockNote}${excessNote}`)) return;
 
   try {
     const res = await api('editDistributedQty', { id, idx, newQty: qty, adminName: currentUser?.name || '' });
