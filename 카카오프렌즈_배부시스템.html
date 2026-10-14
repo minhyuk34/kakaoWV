@@ -304,6 +304,12 @@ tr:hover td{background:var(--card)}
         <label style="font-size:12px;font-weight:700;color:var(--muted)">비밀번호 확인 *</label>
         <input id="reg-pw2" type="password" placeholder="비밀번호 재입력" style="width:100%;margin-top:5px;padding:11px 14px;border:2px solid var(--border);border-radius:10px;font-size:15px;outline:none" onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter')doRegister()">
       </div>
+      <div style="font-size:11px;line-height:1.55;color:var(--muted);background:var(--card);border-radius:8px;padding:9px 11px;margin:-6px 0 14px">
+        <b style="color:var(--text)">개인정보 수집·이용 안내</b><br>
+        · 수집 항목: 이름, 이메일, (신청 시) 연락처·소속·신청 내용<br>
+        · 이용 목적: GIK 배부 신청의 접수·승인과 결과보고 안내<br>
+        · 위 목적 외에는 사용하지 않으며, 가입하면 이에 동의한 것으로 봅니다.
+      </div>
       <button onclick="doRegister()" id="btn-do-register" style="width:100%;background:var(--kakao);color:var(--on-primary);border:none;border-radius:999px;padding:14px;font-size:16px;font-weight:800;cursor:pointer">계정 만들기</button>
       <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:14px">이미 계정이 있으신가요? <a href="#" onclick="switchTab('login');return false" style="color:var(--kakao);font-weight:700">로그인</a></p>
     </div>
@@ -663,11 +669,6 @@ async function loadRequestsFromAPI(force) {
 function getRequests() { return reqCache; }
 
 // ── AUTH ──
-// 구버전 서버 호환용: 새 서버는 password만 사용하고 이 값은 무시한다. 서버를 새 버전으로 배포한 뒤 제거해도 된다.
-async function legacySha256(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-}
 // 비밀번호 규칙(인공지능 업무 보안 지침 제7조) — 서버의 validatePasswordPolicy_와 동일하게 유지한다.
 // 비밀번호는 HTTPS로 서버에 그대로 전달되고, 서버가 규칙을 검사한 뒤 솔트·후추를 붙여 해시해 저장한다.
 const PASSWORD_RULE_TEXT = '영문·숫자·특수문자를 모두 섞어 8자 이상, 또는 두 종류 이상을 섞어 10자 이상 (이름 포함·3자리 연속/반복 문자 불가)';
@@ -794,7 +795,7 @@ async function submitResetPassword(token) {
   if (perr) { showErr(perr); return; }
   if (pw !== pw2) { showErr('비밀번호가 일치하지 않습니다.'); return; }
   try {
-    const res = await api('resetPasswordWithToken', { token, password: pw, hash: await legacySha256(pw) });
+    const res = await api('resetPasswordWithToken', { token, password: pw });
     if (!res.ok) { showErr(res.error); return; }
     document.querySelector('.btn-cancel').style.display = '';
     closeModal();
@@ -815,7 +816,7 @@ async function doRegister() {
   if (pw!==pw2) { showErr('비밀번호가 일치하지 않습니다.'); return; }
   setLoading('btn-do-register', true, '처리 중...');
   try {
-    const res = await api('register', {name, email, password: pw, hash: await legacySha256(pw)});
+    const res = await api('register', {name, email, password: pw});
     if (res.pendingVerification) { // 이메일 인증 후 로그인 가능
       switchTab('login');
       document.getElementById('login-name').value = name;
@@ -835,7 +836,7 @@ async function doLogin() {
   setLoading('btn-do-login', true, '로그인 중...');
   api.onRetry = (n, total) => setLoading('btn-do-login', true, `서버가 바빠 다시 시도 중… (${n}/${total})`);
   try {
-    const res = await api('login', {name, password: pw, hash: await legacySha256(pw)});
+    const res = await api('login', {name, password: pw});
     if (!res.ok) {
       showErr(res.error);
       if (res.code === 'UNVERIFIED') document.getElementById('login-resend').style.display = 'block';
@@ -1648,7 +1649,8 @@ async function refreshReportSheet() {
   if (btn) { btn.disabled=true; btn.textContent='⏳ 갱신 중...'; }
   try {
     const res = await api('generateReport', {});
-    if (res.ok) toast('✅ 배부현황 시트가 갱신되었습니다');
+    if (res.ok && res.throttled) toast('방금 이미 갱신했습니다. 잠시 후 다시 눌러주세요.');
+    else if (res.ok) toast('✅ 배부현황 시트가 갱신되었습니다');
     else toast('❌ 배부현황 갱신 실패: ' + (res.error || '알 수 없는 오류'));
   } catch(e) {
     toast('❌ 서버 오류: ' + e.message);

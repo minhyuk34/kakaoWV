@@ -751,6 +751,7 @@ function onOpen() {
     .addItem('🔐 서버 인증 강제 끄기(비상용)', 'disableAuthEnforcement')
     .addItem('🔐 기존 결과보고 파일 공유 제한(도메인)', 'restrictExistingReportFiles')
     .addItem('🔐 접속로그 점검(최근 7일)', 'reviewAccessLog')
+    .addItem('🔐 시트 ID를 스크립트 속성으로 복사(1회)', 'migrateSheetIdToProperties')
     .addSeparator()
     .addItem('갇힌 신청건 상태 일괄 수정(일부취소+나머지배부완료)', 'fixStuckApprovedStatuses')
     .addItem('레거시 배부완료 건 실제배부수량 보정', 'fixLegacyDistributedItems')
@@ -881,7 +882,10 @@ function doPost(e) {
     }
     session = gate.session;
 
-    if      (action === 'logout')        result = logout(data, session);
+    if (HEAVY_ADMIN_ACTIONS.indexOf(action) >= 0 && rateLimited_('heavy:' + action, HEAVY_MIN_INTERVAL_SEC)) {
+      result = { ok: true, throttled: true, msg: '방금 이미 처리했습니다. 잠시 후 다시 시도해주세요.' };
+    }
+    else if (action === 'logout')        result = logout(data, session);
     else if (action === 'register')      result = register(data);
     else if (action === 'verifyEmail')   result = verifyEmail(data);
     else if (action === 'resendVerification') result = resendVerification(data);
@@ -937,7 +941,7 @@ function doPost(e) {
         (REQ_MUTATING_ACTIONS.includes(action) || ['updateStock', 'setProductBlocked', 'syncStock'].includes(action))) {
       clearStockCache();
     }
-    if (action === 'generateReport') {
+    if (action === 'generateReport' && !(result && result.throttled)) {
       // 프런트에서 수동 새로고침 요청 시 직접 호출 가능 (이때는 바로 결과를 보여줘야 하므로 동기 실행)
       try { generateReport(); result = { ok: true }; }
       catch (reportErr) { result = { ok: false, error: reportErr.message }; }
@@ -991,6 +995,35 @@ const OWNER_ACTION_ID_FIELD = {
   cancelRequest: 'id', cancelItems: 'id', requestCancelItem: 'id',
   saveDistLog: 'id', uploadReport: 'id', mergeIntoRequest: 'existingId'
 };
+
+// ── 남용 방지 (무료 한도 보호) ─────────────────────────────────
+// 로그인하지 않은 요청이 한꺼번에 몰리거나, 가입·재설정 메일이 대량 발송되면
+//  - Apps Script 일일 실행시간/메일 한도가 소진되어 정상 사용자의 업무가 멈춘다.
+// 그래서 (1) 로그인하지 않은 요청 전체의 분당 상한, (2) 공개 동작이 보내는 메일의 시간당 상한을 둔다.
+// 이미 로그인한 사용자의 요청은 이 상한의 영향을 받지 않는다.
+const ANON_MAX_PER_MIN   = 120;
+const PUBLIC_MAIL_MAX_PER_HOUR = 60;
+function anonThrottled_() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const k = 'anon_' + Math.floor(Date.now() / 60000);
+    const n = (Number(cache.get(k)) || 0) + 1;
+    cache.put(k, String(n), 120);
+    return n > ANON_MAX_PER_MIN;
+  } catch (e) { return false; }
+}
+function mailBudgetOk_() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const k = 'pmail_' + Math.floor(Date.now() / 3600000);
+    const n = (Number(cache.get(k)) || 0) + 1;
+    cache.put(k, String(n), 7200);
+    return n <= PUBLIC_MAIL_MAX_PER_HOUR;
+  } catch (e) { return true; }
+}
+// 무거운 관리자 동작은 짧은 시간에 반복 실행되지 않게 한다
+const HEAVY_ADMIN_ACTIONS = ['generateReport', 'syncStock'];
+const HEAVY_MIN_INTERVAL_SEC = 15;
 
 function isAuthEnforced_() {
   try { return PropertiesService.getScriptProperties().getProperty('AUTH_ENFORCED') === 'true'; }
@@ -1098,6 +1131,9 @@ function revokeUserSessions_(name) {
 // 반환: { ok:true, session } 또는 { ok:false, result }  (session이 있으면 data를 서버 기준으로 덮어쓴다)
 function checkAccess_(action, data) {
   const sess = verifySession_(data.sessionToken);
+  if (!sess && anonThrottled_()) {
+    return { ok: false, result: { ok: false, code: 'BUSY', error: '요청이 많아 잠시 후 다시 시도해주세요.' } };
+  }
   if (PUBLIC_ACTIONS.indexOf(action) >= 0) return { ok: true, session: sess };
 
   if (!sess) {
@@ -1248,6 +1284,7 @@ function register(data) {
   if (email.length > 120 || !/^[^\s@<>"']+@worldvision\.or\.kr$/i.test(email))
     return { ok: false, error: 'worldvision.or.kr 메일로만 가입할 수 있습니다.' };
 
+  if (!mailBudgetOk_()) return { ok: false, error: '요청이 많아 잠시 후 다시 시도해주세요.' };
   const token = Utilities.getUuid();
   const expiresAt = String(Date.now() + VERIFY_TTL_MS);
   const lock = LockService.getScriptLock();
@@ -1298,7 +1335,7 @@ function resendVerification({ name }) {
   const GENERIC = { ok: true, msg: '인증 대기 중인 계정이면 인증 메일을 다시 보냈습니다.' };
   const nm = cleanText_(name).slice(0, 30);
   if (!nm) return { ok: false, error: '이름을 입력해주세요.' };
-  if (rateLimited_('ver:' + nm, 60)) return GENERIC;
+  if (rateLimited_('ver:' + nm, 60) || !mailBudgetOk_()) return GENERIC;
   const s = sheet(SHEET_ACCT);
   const rows = s.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
@@ -1354,7 +1391,7 @@ function findAccountByEmail({ email }) {
   const GENERIC = { ok: true, msg: '입력하신 이메일로 가입된 계정이 있으면 안내 메일을 보냈습니다.' };
   if (!email) return { ok: false, error: '이메일을 입력해주세요.' };
   const wanted = String(email).trim().toLowerCase();
-  if (rateLimited_('fid:' + wanted, 60)) return GENERIC;
+  if (rateLimited_('fid:' + wanted, 60) || !mailBudgetOk_()) return GENERIC;
   const rows = sheet(SHEET_ACCT).getDataRange().getValues().slice(1);
   const names = rows.filter(r => String(r[3] || '').trim().toLowerCase() === wanted).map(r => r[0]);
   if (names.length > 0) {
@@ -1380,7 +1417,7 @@ function requestPasswordReset({ name, email }) {
   name = cleanText_(name);
   if (!name || !email) return { ok: false, error: '이름과 이메일을 입력해주세요.' };
   const wantedEmail = String(email).trim().toLowerCase();
-  if (rateLimited_('rst:' + name + '|' + wantedEmail, 60)) return GENERIC;
+  if (rateLimited_('rst:' + name + '|' + wantedEmail, 60) || !mailBudgetOk_()) return GENERIC;
 
   const s = sheet(SHEET_ACCT);
   const rows = s.getDataRange().getValues();
@@ -3382,9 +3419,25 @@ function getFeedback() {
 // ── 유틸 ──────────────────────────────────────────────────────
 // 한 번의 실행(요청) 안에서는 같은 스프레드시트 객체를 재사용한다 — openById는 열 때마다
 // 비용이 들고, 재고 조정처럼 sheet()를 여러 번 부르는 흐름에서 그 비용이 누적됐다.
+// 시트 ID는 스크립트 속성(SHEET_ID)을 먼저 보고, 없으면 파일 맨 위의 SHEET_ID 상수를 쓴다.
+// 속성으로 옮겨 두면 코드(공개 저장소)에서 ID 상수를 지워도 동작한다. → migrateSheetIdToProperties() 참고
+function getSheetId_() {
+  try {
+    const v = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+    if (v) return v;
+  } catch (e) {}
+  return SHEET_ID;
+}
+// 1회 실행: 현재 상수에 들어 있는 시트 ID를 스크립트 속성으로 복사한다(코드 동작은 그대로).
+function migrateSheetIdToProperties() {
+  PropertiesService.getScriptProperties().setProperty('SHEET_ID', SHEET_ID);
+  const msg = '시트 ID를 스크립트 속성(SHEET_ID)에 저장했습니다. 이제 코드의 상수를 지워도 동작합니다.';
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
+}
 let _ssMemo = null;
 function openSS() {
-  if (!_ssMemo) _ssMemo = SpreadsheetApp.openById(SHEET_ID);
+  if (!_ssMemo) _ssMemo = SpreadsheetApp.openById(getSheetId_());
   return _ssMemo;
 }
 function sheet(name) {
