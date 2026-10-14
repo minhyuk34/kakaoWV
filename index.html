@@ -2,6 +2,8 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://script.google.com https://*.googleusercontent.com; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>카카오프렌즈 GIK배분시스템 | 월드비전</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -252,7 +254,7 @@ tr:hover td{background:var(--card)}
       <!-- 4 -->
       <div style="background:var(--bg);border-radius:12px;padding:14px 16px;border-left:3px solid #0984E3;box-shadow:0 1px 4px rgba(34,37,42,.06)">
         <div style="font-size:12px;font-weight:800;color:#0984E3;margin-bottom:4px">✍️ 회원가입 안내</div>
-        <div style="font-size:13px;line-height:1.6;color:var(--text)">이름·<b>@worldvision.or.kr 이메일</b>·비밀번호를 입력하시면 됩니다. 이름은 <b>가명도 가능</b>합니다.<br><span style="color:#0984E3;font-weight:700">※ worldvision.or.kr 메일로만 가입할 수 있습니다.</span></div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text)">이름·<b>@worldvision.or.kr 이메일</b>·비밀번호를 입력하면 <b>인증 메일</b>이 발송됩니다. 메일의 링크를 누르면 가입이 완료됩니다. 이름은 로그인 아이디로 쓰이니 <b>본인 이름</b>으로 가입해주세요.<br><span style="color:#0984E3;font-weight:700">※ worldvision.or.kr 메일로만 가입할 수 있습니다.</span></div>
       </div>
     </div>
   </div>
@@ -294,7 +296,8 @@ tr:hover td{background:var(--card)}
         <input id="reg-email" type="email" placeholder="아이디@worldvision.or.kr" style="width:100%;margin-top:5px;padding:11px 14px;border:2px solid var(--border);border-radius:10px;font-size:15px;outline:none" onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'">
       </div>
       <div style="margin-bottom:12px">
-        <label style="font-size:12px;font-weight:700;color:var(--muted)">비밀번호 * (6자 이상)</label>
+        <label style="font-size:12px;font-weight:700;color:var(--muted)">비밀번호 *</label>
+        <p style="font-size:11px;color:var(--muted);margin:2px 0 0;line-height:1.5">영문·숫자·특수문자를 섞어 8자 이상 (두 종류만 섞으면 10자 이상)<br>이름 포함, 123·abc·111처럼 3자리 연속/반복은 불가</p>
         <input id="reg-pw" type="password" placeholder="비밀번호 설정" style="width:100%;margin-top:5px;padding:11px 14px;border:2px solid var(--border);border-radius:10px;font-size:15px;outline:none" onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'">
       </div>
       <div style="margin-bottom:20px">
@@ -305,6 +308,7 @@ tr:hover td{background:var(--card)}
       <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:14px">이미 계정이 있으신가요? <a href="#" onclick="switchTab('login');return false" style="color:var(--kakao);font-weight:700">로그인</a></p>
     </div>
     <p id="login-err" style="color:var(--red);font-size:13px;text-align:center;margin-top:12px;display:none"></p>
+    <p id="login-resend" style="font-size:12px;text-align:center;margin-top:6px;display:none"><a href="#" onclick="resendVerification();return false" style="color:var(--kakao);font-weight:700">인증 메일 다시 받기</a></p>
   </div><!-- end 로그인카드 -->
   </div><!-- end flex wrapper -->
 </div><!-- end login-screen -->
@@ -575,13 +579,36 @@ function apiOnce(action, data) {
     };
     xhr.onerror = () => reject(new Error('네트워크 오류'));
     xhr.ontimeout = () => reject(new Error('서버 응답 시간 초과'));
-    xhr.send(JSON.stringify({action, ...data}));
+    // 로그인한 상태면 서버가 사용자·역할을 확인할 수 있도록 세션 토큰을 함께 보낸다.
+    // (역할/이름은 서버가 토큰에서 직접 읽으므로 여기서 보내는 role·name 값은 서버에서 무시된다)
+    const payload = { action, ...data };
+    if (!payload.sessionToken && currentUser?.sessionToken) payload.sessionToken = currentUser.sessionToken;
+    if (window.__bgRefresh) payload.bg = true; // 자동 새로고침 요청은 서버 세션을 연장하지 않는다
+    xhr.send(JSON.stringify(payload));
   });
+}
+// 서버가 로그인 만료/미로그인으로 거부했을 때: 세션을 정리하고 로그인 화면으로 돌려보낸다.
+let _authExpiredHandling = false;
+function handleAuthExpired(msg) {
+  if (_authExpiredHandling || !currentUser) return;
+  _authExpiredHandling = true;
+  doLogout(true);
+  showErr(msg || '로그인이 만료되었습니다. 다시 로그인해주세요.');
+  setTimeout(() => { _authExpiredHandling = false; }, 1000);
 }
 async function api(action, data={}) {
   const retries = READ_ACTIONS.includes(action) ? 2 : 0;
   for (let attempt = 0; ; attempt++) {
-    try { return await apiOnce(action, data); }
+    try {
+      const res = await apiOnce(action, data);
+      if (res && res.code === 'AUTH_REQUIRED' && action !== 'login') handleAuthExpired(res.error);
+      // 서버가 활동 중인 세션을 연장하면서 보내준 새 토큰으로 교체
+      if (res && res.sessionToken && currentUser && action !== 'login' && action !== 'register') {
+        currentUser.sessionToken = res.sessionToken;
+        try { sessionStorage.setItem('currentUser', JSON.stringify(currentUser)); } catch(e) {}
+      }
+      return res;
+    }
     catch(e) {
       if (attempt >= retries) throw e;
       if (typeof api.onRetry === 'function') api.onRetry(attempt + 2, retries + 1); // 화면에 "재시도 중" 표시용
@@ -636,9 +663,31 @@ async function loadRequestsFromAPI(force) {
 function getRequests() { return reqCache; }
 
 // ── AUTH ──
-async function sha256(str) {
+// 구버전 서버 호환용: 새 서버는 password만 사용하고 이 값은 무시한다. 서버를 새 버전으로 배포한 뒤 제거해도 된다.
+async function legacySha256(str) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+// 비밀번호 규칙(인공지능 업무 보안 지침 제7조) — 서버의 validatePasswordPolicy_와 동일하게 유지한다.
+// 비밀번호는 HTTPS로 서버에 그대로 전달되고, 서버가 규칙을 검사한 뒤 솔트·후추를 붙여 해시해 저장한다.
+const PASSWORD_RULE_TEXT = '영문·숫자·특수문자를 모두 섞어 8자 이상, 또는 두 종류 이상을 섞어 10자 이상 (이름 포함·3자리 연속/반복 문자 불가)';
+function validatePasswordPolicy(pw, name) {
+  pw = String(pw || '');
+  const kinds = [/[A-Za-z]/, /[0-9]/, /[^A-Za-z0-9]/].filter(re => re.test(pw)).length;
+  const okLen = kinds >= 3 ? pw.length >= 8 : (kinds === 2 ? pw.length >= 10 : false);
+  if (!okLen) return '비밀번호는 영문·숫자·특수문자를 모두 섞어 8자 이상, 또는 두 종류 이상을 섞어 10자 이상이어야 합니다.';
+  const nm = String(name || '').trim().replace(/\s+/g, ' ');
+  if (nm && pw.toLowerCase().indexOf(nm.toLowerCase()) >= 0) return '이름이 포함된 비밀번호는 사용할 수 없습니다.';
+  const low = pw.toLowerCase();
+  const isAlnum = c => (c >= 48 && c <= 57) || (c >= 97 && c <= 122);
+  for (let i = 0; i + 2 < low.length; i++) {
+    const c1 = low.charCodeAt(i), c2 = low.charCodeAt(i + 1), c3 = low.charCodeAt(i + 2);
+    if (!(isAlnum(c1) && isAlnum(c2) && isAlnum(c3))) continue;
+    if ((c2 - c1 === 1 && c3 - c2 === 1) || (c1 - c2 === 1 && c2 - c3 === 1) || (c1 === c2 && c2 === c3)) {
+      return '3자리 이상 연속된 문자·숫자(예: abc, 123, 111)는 사용할 수 없습니다.';
+    }
+  }
+  return '';
 }
 function updateTeamList() {
   const dept = document.getElementById('req-dept').value;
@@ -667,7 +716,7 @@ function showFindAccountModal() {
   document.getElementById('modal-body').innerHTML = `
     <div style="margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--border)">
       <p style="font-size:13px;font-weight:700;margin-bottom:8px">아이디(이름) 찾기</p>
-      <p style="font-size:12px;color:var(--muted);margin-bottom:8px">가입할 때 입력한 이메일을 입력하면 등록된 이름을 알려드립니다.</p>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:8px">가입할 때 입력한 이메일을 입력하면 등록된 이름을 메일로 보내드립니다.</p>
       <div style="display:flex;gap:6px">
         <input id="find-id-email" type="email" placeholder="가입 시 등록한 이메일" style="flex:1;padding:9px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none" onkeydown="if(event.key==='Enter')submitFindId()">
         <button onclick="submitFindId()" style="padding:9px 16px;border:none;border-radius:8px;background:var(--kakao);color:var(--on-primary);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">찾기</button>
@@ -698,7 +747,7 @@ async function submitFindId() {
     resultEl.style.display = 'block';
     if (!res.ok) { resultEl.style.color = 'var(--red)'; resultEl.textContent = res.error; return; }
     resultEl.style.color = 'var(--green)';
-    resultEl.textContent = `등록된 이름: ${res.names.join(', ')}`;
+    resultEl.textContent = res.msg || '입력하신 이메일로 가입된 계정이 있으면 안내 메일을 보냈습니다.';
   } catch (e) { toast('❌ 서버 오류: ' + e.message); }
 }
 async function submitRequestReset() {
@@ -711,7 +760,7 @@ async function submitRequestReset() {
     resultEl.style.display = 'block';
     if (!res.ok) { resultEl.style.color = 'var(--red)'; resultEl.textContent = res.error; return; }
     resultEl.style.color = 'var(--green)';
-    resultEl.textContent = '이메일로 재설정 링크를 보냈습니다. (30분 이내 유효)';
+    resultEl.textContent = res.msg || '입력하신 정보와 일치하는 계정이 있으면 재설정 메일을 보냈습니다. (30분 이내 유효)';
   } catch (e) { toast('❌ 서버 오류: ' + e.message); }
 }
 // 재설정 링크(?resetToken=...)로 들어왔을 때 로그인 화면 위에 새 비밀번호 설정 모달을 띄운다.
@@ -720,7 +769,8 @@ function showResetPasswordScreen(token) {
   document.getElementById('modal-body').innerHTML = `
     <p style="margin-bottom:14px;font-size:13px;color:var(--muted)">새로 사용할 비밀번호를 입력해주세요.</p>
     <div style="margin-bottom:10px">
-      <label style="font-size:12px;font-weight:700;color:var(--muted)">새 비밀번호 (6자 이상)</label>
+      <label style="font-size:12px;font-weight:700;color:var(--muted)">새 비밀번호</label>
+      <p style="font-size:11px;color:var(--muted);margin:2px 0 0">${PASSWORD_RULE_TEXT}</p>
       <input id="reset-pw" type="password" placeholder="새 비밀번호" style="width:100%;margin-top:5px;padding:10px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none">
     </div>
     <div>
@@ -740,11 +790,11 @@ async function submitResetPassword(token) {
   const errEl = document.getElementById('reset-pw-err');
   const showErr = (msg) => { errEl.textContent = msg; errEl.style.display = 'block'; };
   errEl.style.display = 'none';
-  if (pw.length < 6) { showErr('비밀번호는 6자 이상이어야 합니다.'); return; }
+  const perr = validatePasswordPolicy(pw, '');
+  if (perr) { showErr(perr); return; }
   if (pw !== pw2) { showErr('비밀번호가 일치하지 않습니다.'); return; }
   try {
-    const hash = await sha256(pw);
-    const res = await api('resetPasswordWithToken', { token, hash });
+    const res = await api('resetPasswordWithToken', { token, password: pw, hash: await legacySha256(pw) });
     if (!res.ok) { showErr(res.error); return; }
     document.querySelector('.btn-cancel').style.display = '';
     closeModal();
@@ -760,14 +810,20 @@ async function doRegister() {
   if (!name) { showErr('이름을 입력해주세요.'); return; }
   if (!email||!email.includes('@')) { showErr('올바른 이메일을 입력해주세요.'); return; }
   if (!/^[^\s@]+@worldvision\.or\.kr$/i.test(email)) { showErr('worldvision.or.kr 메일로만 가입할 수 있습니다.'); return; }
-  if (pw.length<6) { showErr('비밀번호는 6자 이상이어야 합니다.'); return; }
+  const perr = validatePasswordPolicy(pw, name);
+  if (perr) { showErr(perr); return; }
   if (pw!==pw2) { showErr('비밀번호가 일치하지 않습니다.'); return; }
   setLoading('btn-do-register', true, '처리 중...');
   try {
-    const hash = await sha256(pw);
-    const res = await api('register', {name, email, hash});
+    const res = await api('register', {name, email, password: pw, hash: await legacySha256(pw)});
+    if (res.pendingVerification) { // 이메일 인증 후 로그인 가능
+      switchTab('login');
+      document.getElementById('login-name').value = name;
+      showNotice(res.error || '인증 메일을 보냈습니다. 메일의 링크를 누른 뒤 로그인해주세요.');
+      return;
+    }
     if (!res.ok) { showErr(res.error); return; }
-    enterSystem({name:res.name, role:res.role, email:res.email});
+    enterSystem({name:res.name, role:res.role, email:res.email, sessionToken:res.sessionToken});
   } catch(e) { showErr('서버 연결 실패. 잠시 후 다시 시도해주세요.'); }
   finally { setLoading('btn-do-register', false, '계정 만들기'); }
 }
@@ -779,10 +835,13 @@ async function doLogin() {
   setLoading('btn-do-login', true, '로그인 중...');
   api.onRetry = (n, total) => setLoading('btn-do-login', true, `서버가 바빠 다시 시도 중… (${n}/${total})`);
   try {
-    const hash = await sha256(pw);
-    const res = await api('login', {name, hash});
-    if (!res.ok) { showErr(res.error); return; }
-    enterSystem({name:res.name, role:res.role, email:res.email});
+    const res = await api('login', {name, password: pw, hash: await legacySha256(pw)});
+    if (!res.ok) {
+      showErr(res.error);
+      if (res.code === 'UNVERIFIED') document.getElementById('login-resend').style.display = 'block';
+      return;
+    }
+    enterSystem({name:res.name, role:res.role, email:res.email, sessionToken:res.sessionToken});
   } catch(e) { showErr('서버가 일시적으로 응답하지 않습니다. 1~2분 뒤 다시 시도해주세요. (' + e.message + ')'); }
   finally { api.onRetry = null; setLoading('btn-do-login', false, '로그인'); }
 }
@@ -797,6 +856,7 @@ async function enterSystem(user) {
   document.getElementById('userInfo').textContent = `👤 ${user.name}${user.role==='admin' ? ' (관리자)' : ''}`;
   document.getElementById('btn-admin').style.display = user.role==='admin' ? '' : 'none';
   cart={};
+  startIdleWatch();
   await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
   updateCartBadge(); updateStats();
   startAutoRefresh();
@@ -822,7 +882,31 @@ function openManual() {
     : '카카오배부시스템/카카오프렌즈_GIK배분시스템_사용설명서_직원용.html';
   window.open(file, '_blank');
 }
-function doLogout() {
+// 사용하지 않은 채 30분이 지나면 자동 로그아웃(서버 세션 만료 시간과 같다)
+const IDLE_LOGOUT_MS = 30 * 60 * 1000;
+let _idleTimer = null;
+function resetIdleTimer() {
+  if (!currentUser) return;
+  clearTimeout(_idleTimer);
+  _idleTimer = setTimeout(() => {
+    if (!currentUser) return;
+    doLogout();
+    showErr('30분 동안 사용하지 않아 자동으로 로그아웃되었습니다. 다시 로그인해주세요.');
+  }, IDLE_LOGOUT_MS);
+}
+let _idleWired = false;
+function startIdleWatch() {
+  if (!_idleWired) {
+    _idleWired = true;
+    ['click','keydown','touchstart','scroll'].forEach(ev => window.addEventListener(ev, resetIdleTimer, { passive: true }));
+  }
+  resetIdleTimer();
+}
+function doLogout(skipServer) {
+  // 서버에서도 이 로그인 세션을 폐기한다(응답은 기다리지 않는다)
+  const _tok = currentUser?.sessionToken;
+  if (_tok && !skipServer) { apiOnce('logout', { sessionToken: _tok }).catch(()=>{}); }
+  clearTimeout(_idleTimer);
   currentUser=null; sessionStorage.removeItem('currentUser'); cart={};
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('main-nav').style.display='none';
@@ -831,7 +915,27 @@ function doLogout() {
   switchTab('login');
 }
 function showErr(msg) {
-  const el=document.getElementById('login-err'); el.textContent=msg; el.style.display='block';
+  const el=document.getElementById('login-err'); el.style.color='var(--red)'; el.textContent=msg; el.style.display='block';
+}
+function showNotice(msg) {
+  const el=document.getElementById('login-err'); el.style.color='var(--green)'; el.textContent=msg; el.style.display='block';
+}
+async function resendVerification() {
+  const name=document.getElementById('login-name').value.trim();
+  if (!name) { showErr('이름을 입력해주세요.'); return; }
+  try {
+    const res = await api('resendVerification', { name });
+    if (res.ok) showNotice(res.msg || '인증 메일을 다시 보냈습니다.'); else showErr(res.error || '요청에 실패했습니다.');
+  } catch (e) { showErr('서버가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도해주세요.'); }
+}
+// 가입 인증 메일의 링크(?verifyToken=...)로 들어왔을 때
+async function handleVerifyLink(token) {
+  history.replaceState(null, '', location.pathname);
+  try {
+    const res = await api('verifyEmail', { token });
+    if (res.ok) showNotice('✅ 이메일 인증이 완료되었습니다. 로그인해주세요.');
+    else showErr(res.error || '인증 링크가 올바르지 않습니다.');
+  } catch (e) { showErr('서버가 일시적으로 응답하지 않습니다. 잠시 후 이 링크를 다시 눌러주세요.'); }
 }
 
 // ── PAGES ──
@@ -914,7 +1018,7 @@ function renderCart() {
         <div>
           <div style="font-size:13px;font-weight:600">${p.name}</div>
           <div style="font-size:12px;color:var(--muted);margin-top:2px">${qty}개 × ${price ? price.toLocaleString()+'원' : '가격미정'} = <b style="color:var(--brown)">${total ? total.toLocaleString()+'원' : '-'}</b></div>
-          <input id="item-detail-${num}" type="text" placeholder="* 상세사업 입력 필수 (예: 아동 직접 배부용)" value="${prevDetail}"
+          <input id="item-detail-${num}" type="text" placeholder="* 상세사업 입력 필수 (예: 아동 직접 배부용)" value="${esc(prevDetail)}"
             style="width:100%;margin-top:6px;padding:7px 10px;border:1.5px solid #f0a500;border-radius:6px;font-size:12px;outline:none"
             onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor=this.value?'var(--border)':'#f0a500'">
         </div>
@@ -1134,15 +1238,15 @@ function renderMyRequests() {
         </div>
       </div>
       <div class="req-info-grid">
-        <div><span style="color:var(--muted)">본부</span> <b>${r.dept||'-'}</b></div>
-        <div><span style="color:var(--muted)">팀</span> <b>${r.team||'-'}</b></div>
-        <div><span style="color:var(--muted)">이름</span> <b>${r.name||'-'}</b></div>
-        <div><span style="color:var(--muted)">연락처</span> <b>${r.contact||'-'}</b></div>
+        <div><span style="color:var(--muted)">본부</span> <b>${esc(r.dept)||'-'}</b></div>
+        <div><span style="color:var(--muted)">팀</span> <b>${esc(r.team)||'-'}</b></div>
+        <div><span style="color:var(--muted)">이름</span> <b>${esc(r.name)||'-'}</b></div>
+        <div><span style="color:var(--muted)">연락처</span> <b>${esc(r.contact)||'-'}</b></div>
         <div><span style="color:var(--muted)">수취예정일</span> <b>${dateOnly(r.pickupDate)||'-'}</b></div>
         <div><span style="color:var(--muted)">사용예정일</span> <b>${dateOnly(r.useDate)||'-'}</b></div>
-        <div style="grid-column:1/-1"><span style="color:var(--muted)">사용처</span> <b>${r.reason||'-'}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--muted)">사용처</span> <b>${esc(r.reason)||'-'}</b></div>
       </div>
-      ${(()=>{ const {otherNote}=parseReportLinks(r.adminNote); return otherNote?`<div style="font-size:12px;background:#FFF3CD;padding:6px 10px;border-radius:6px;margin-bottom:10px">💬 관리자: ${otherNote}</div>`:''; })()}
+      ${(()=>{ const {otherNote}=parseReportLinks(r.adminNote); return otherNote?`<div style="font-size:12px;background:#FFF3CD;padding:6px 10px;border-radius:6px;margin-bottom:10px">💬 관리자: ${esc(otherNote)}</div>`:''; })()}
       ${hasReportSubmitted(r)?`<div style="margin-bottom:10px"><p style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">📂 등록된 결과보고 파일</p>${reportLinksHtml(r.adminNote,{boxed:true,fontSize:'13px'})}</div>`:''}
       ${r.status==='distributed'?`<div style="margin-bottom:10px"><button onclick="showReportUpload('${r.id}')" style="background:var(--blue);color:#fff;border:none;border-radius:7px;padding:7px 16px;font-size:13px;font-weight:700;cursor:pointer">📎 결과보고서 ${hasReportSubmitted(r)?'수정':'등록'}</button></div>`:''}
       <table style="font-size:13px;width:100%"><thead><tr><th>제품명</th><th>수량</th><th>배부처 기록</th><th>배부수</th><th>남은개수</th></tr></thead>
@@ -1160,7 +1264,7 @@ function renderMyRequests() {
         else if (canCancel) itemAction = `<button onclick="cancelItem('${r.id}',${idx})" style="background:none;border:1px solid #ccc;color:#888;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer">항목취소</button>`;
         else if (canRequestCancel) itemAction = `<button onclick="requestCancelItem('${r.id}',${idx})" style="background:none;border:1.5px solid var(--red);color:var(--red);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-weight:600">취소신청</button>`;
         return `<tr style="${isCancelled?'opacity:0.4;text-decoration:line-through':''}">
-          <td>${i.name}</td><td>${i.qty}개</td>
+          <td>${esc(i.name)}</td><td>${i.qty}개</td>
           <td colspan="2">${itemAction}</td>
           <td>-</td>
         </tr>`;
@@ -1174,6 +1278,16 @@ function renderMyRequests() {
 let distLogState = {};
 function distLogKey(reqId, idx) { return reqId + '_' + idx; }
 function distLogTotalQty(item) { return Number(item.distributedQty ?? item.qty) || 0; }
+// HTML 텍스트·속성 어디에 넣어도 안전하도록 &, <, >, 따옴표를 모두 치환한다.
+// 사용자가 입력한 값(이름, 본부/팀, 연락처, 사용처, 물품명, 메모 등)을 innerHTML에 넣을 때 반드시 거친다.
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// 외부 링크는 구글 드라이브/문서 주소만 허용(javascript: 등 다른 스킴이 href로 들어가는 것을 막는다)
+function safeUrl(u) {
+  const t = String(u || '').trim();
+  return /^https:\/\/(drive|docs)\.google\.com\//i.test(t) ? t : '';
+}
 function escAttr(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function ensureDistLogState(reqId, idx, existing) {
   const key = distLogKey(reqId, idx);
@@ -1195,14 +1309,14 @@ function distLogSectionHtml(reqId, idx, item) {
 
   const lineRows = arr.map((e, li) => `
     <tr>
-      ${li===0 ? `<td rowspan="${rowspan}">${item.name}</td><td rowspan="${rowspan}">${totalQty.toLocaleString()}개</td>` : ''}
+      ${li===0 ? `<td rowspan="${rowspan}">${esc(item.name)}</td><td rowspan="${rowspan}">${totalQty.toLocaleString()}개</td>` : ''}
       <td>
         <input type="text" placeholder="배부처 (예: OO팀, OO기관)" value="${escAttr(e.dest)}"
           oninput="setDistLogField('${reqId}',${idx},${li},'dest',this.value)"
           style="width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;outline:none">
       </td>
       <td style="white-space:nowrap">
-        <input type="number" min="0" placeholder="수량" value="${e.qty}"
+        <input type="number" min="0" placeholder="수량" value="${esc(e.qty)}"
           oninput="setDistLogField('${reqId}',${idx},${li},'qty',this.value)"
           style="width:70px;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;outline:none">
         ${n>1?`<button onclick="removeDistLogRow('${reqId}',${idx},${li})" title="이 행 삭제" style="border:none;background:none;color:var(--red);cursor:pointer;font-size:13px;margin-left:2px">✕</button>`:''}
@@ -1416,9 +1530,9 @@ function renderAdminRequests() {
   <tbody>${reqs.map(r=>`<tr>
     <td><input type="checkbox" class="req-select-chk" data-id="${r.id}" ${selectedReqIds.has(String(r.id))?'checked':''} onchange="toggleReqSelect('${r.id}',this.checked)"></td>
     <td style="font-size:12px">${r.createdAt}</td>
-    <td><b>${r.dept||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
-    <td><b>${r.name||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.contact||'-'}</span></td>
-    <td style="font-size:12px">${(r.reason||'').substring(0,18)}${(r.reason||'').length>18?'…':''}</td>
+    <td><b>${esc(r.dept)||'-'}</b><br><span style="color:var(--muted);font-size:12px">${esc(r.team)||'-'}</span></td>
+    <td><b>${esc(r.name)||'-'}</b><br><span style="color:var(--muted);font-size:12px">${esc(r.contact)||'-'}</span></td>
+    <td style="font-size:12px">${esc((r.reason||'').substring(0,18))}${(r.reason||'').length>18?'…':''}</td>
     <td style="font-size:12px">${dateOnly(r.pickupDate)||'-'}</td>
     <td style="font-size:12px">${dateOnly(r.useDate)||'-'}</td>
     <td><a href="#" onclick="showDetail('${r.id}');return false" style="color:var(--blue)">${r.items.filter(i=>!i.cancelled).length}종 ${r.items.filter(i=>!i.cancelled).reduce((s,i)=>s+i.qty,0)}개 ▶</a></td>
@@ -1474,7 +1588,7 @@ function generatePickList() {
   const agg = {}; // "번호|제품명" -> 수량
   reqs.forEach(r => {
     r.items.filter(i => !i.cancelled).forEach(i => {
-      const key = `${String(i.num).padStart(3,'0')}|${i.name}`;
+      const key = `${String(i.num).padStart(3,'0')}|${esc(i.name)}`;
       agg[key] = (agg[key] || 0) + i.qty;
     });
   });
@@ -1491,12 +1605,12 @@ function generatePickList() {
     return `
     <div class="person-block">
       <div class="person-head">
-        <b>${r.name||'-'}</b> <span class="muted">(${r.team||r.dept||'-'})</span>
-        <span class="muted"> · 연락처 ${r.contact||'-'}</span>
+        <b>${esc(r.name)||'-'}</b> <span class="muted">(${esc(r.team||r.dept)||'-'})</span>
+        <span class="muted"> · 연락처 ${esc(r.contact)||'-'}</span>
         <span class="muted"> · ${items.length}종 ${qtySum.toLocaleString()}개</span>
       </div>
       <table><thead><tr><th style="width:70px">번호</th><th>제품명</th><th style="width:90px;text-align:right">수량</th></tr></thead>
-      <tbody>${items.map(i=>`<tr><td>${i.num}</td><td>${i.name}</td><td class="qty">${i.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
+      <tbody>${items.map(i=>`<tr><td>${i.num}</td><td>${esc(i.name)}</td><td class="qty">${i.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
     </div>`;
   }).join('');
 
@@ -1522,7 +1636,7 @@ function generatePickList() {
     <h1>📦 창고 피킹리스트</h1>
     <div class="sub">출력일: ${today} · 선택 신청 ${reqs.length}건 · 총 ${totalRows.length}종 ${totalRows.reduce((s,r)=>s+r.qty,0).toLocaleString()}개</div>
     <table><thead><tr><th style="width:70px">번호</th><th>제품명</th><th style="width:90px;text-align:right">수량</th></tr></thead>
-    <tbody>${totalRows.map(r=>`<tr><td>${r.num}</td><td>${r.name}</td><td class="qty">${r.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
+    <tbody>${totalRows.map(r=>`<tr><td>${r.num}</td><td>${esc(r.name)}</td><td class="qty">${r.qty.toLocaleString()}개</td></tr>`).join('')}</tbody></table>
     <h2>👤 신청인별 내역</h2>
     ${personSections}
     <button class="print-btn" onclick="window.print()">🖨️ 인쇄</button>
@@ -1750,9 +1864,9 @@ function renderAdminAudit() {
         <td style="font-weight:700;color:var(--red)">${r.atRiskQty.toLocaleString()}개</td>
         <td>${r.qty.toLocaleString()}개</td>
         <td style="font-size:12px">${r.createdAt}</td>
-        <td><a href="#" onclick="showDetail('${r.reqId}');return false" style="color:var(--blue)"><b>${r.name||'-'}</b></a></td>
-        <td>${r.dept||'-'}<br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
-        <td style="font-size:12px">${r.contact||'-'}</td>
+        <td><a href="#" onclick="showDetail('${r.reqId}');return false" style="color:var(--blue)"><b>${esc(r.name)||'-'}</b></a></td>
+        <td>${esc(r.dept)||'-'}<br><span style="color:var(--muted);font-size:12px">${esc(r.team)||'-'}</span></td>
+        <td style="font-size:12px">${esc(r.contact)||'-'}</td>
       </tr>`).join('')}</tbody></table>`;
 
   const adminAddedSection = adminAddedRows.length === 0
@@ -1760,9 +1874,9 @@ function renderAdminAudit() {
     : `<table><thead><tr><th>신청시각</th><th>이름</th><th>본부/팀</th><th>연락처</th><th>제품명</th><th>수량</th><th>지급일</th></tr></thead>
       <tbody>${adminAddedRows.map(r=>`<tr>
         <td style="font-size:12px">${r.createdAt}</td>
-        <td><a href="#" onclick="showDetail('${r.reqId}');return false" style="color:var(--blue)"><b>${r.name||'-'}</b></a></td>
-        <td>${r.dept||'-'}<br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
-        <td style="font-size:12px">${r.contact||'-'}</td>
+        <td><a href="#" onclick="showDetail('${r.reqId}');return false" style="color:var(--blue)"><b>${esc(r.name)||'-'}</b></a></td>
+        <td>${esc(r.dept)||'-'}<br><span style="color:var(--muted);font-size:12px">${esc(r.team)||'-'}</span></td>
+        <td style="font-size:12px">${esc(r.contact)||'-'}</td>
         <td>${r.itemName}</td>
         <td>${r.qty.toLocaleString()}개</td>
         <td style="font-size:12px">${r.distributeDate||'-'}</td>
@@ -1828,8 +1942,8 @@ function showStockDetail(num, kind) {
       <tbody>${list.map(e => {
         const over = showReqQtyCol && (Number(e.qty)||0) > (Number(e.reqQty)||0);
         return `<tr>
-        <td>${e.name}</td>
-        <td>${e.dept} / ${e.team}</td>
+        <td>${esc(e.name)}</td>
+        <td>${esc(e.dept)} / ${esc(e.team)}</td>
         <td>${dateOnly(e.date) || e.date || '-'}</td>
         ${showStatusCol?`<td>${e.status}</td>`:''}
         ${showReqQtyCol?`<td style="text-align:right">${(Number(e.reqQty)||0).toLocaleString()}개</td>`:''}
@@ -1866,12 +1980,13 @@ function parseReportLinks(note) {
 }
 function reportLinksHtml(note, opts) {
   opts = opts || {};
-  const { listUrl, docUrl } = parseReportLinks(note);
+  const parsed = parseReportLinks(note);
+  const listUrl = safeUrl(parsed.listUrl), docUrl = safeUrl(parsed.docUrl);
   if (!listUrl && !docUrl) return '';
   const linkStyle = 'color:var(--blue);font-weight:700;text-decoration:none;white-space:nowrap';
   return `<div style="${opts.boxed?'background:#E8F5E9;border-radius:6px;padding:6px 10px;':''}display:flex;gap:12px;font-size:${opts.fontSize||'12px'};margin-top:${opts.marginTop||'4px'}">
-    ${listUrl?`<a href="${listUrl}" target="_blank" rel="noopener" style="${linkStyle}">📋 배부명단</a>`:''}
-    ${docUrl?`<a href="${docUrl}" target="_blank" rel="noopener" style="${linkStyle}">📄 결과보고서</a>`:''}
+    ${listUrl?`<a href="${esc(listUrl)}" target="_blank" rel="noopener" style="${linkStyle}">📋 배부명단</a>`:''}
+    ${docUrl?`<a href="${esc(docUrl)}" target="_blank" rel="noopener" style="${linkStyle}">📄 결과보고서</a>`:''}
   </div>`;
 }
 function historyCategory(r) {
@@ -1965,9 +2080,9 @@ function renderAdminHistory() {
     return `<tr>
     <td>${r.status==='distributed'?`<input type="checkbox" class="history-select-chk" data-id="${r.id}" ${selectedHistoryIds.has(String(r.id))?'checked':''} onchange="toggleHistorySelect('${r.id}',this.checked)">`:''}</td>
     <td style="font-size:12px">${r.updatedAt||r.createdAt}</td>
-    <td><b>${r.dept||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.team||'-'}</span></td>
-    <td><b>${r.name||'-'}</b><br><span style="color:var(--muted);font-size:12px">${r.contact||'-'}</span></td>
-    <td style="font-size:12px">${r.reason||'-'}</td>
+    <td><b>${esc(r.dept)||'-'}</b><br><span style="color:var(--muted);font-size:12px">${esc(r.team)||'-'}</span></td>
+    <td><b>${esc(r.name)||'-'}</b><br><span style="color:var(--muted);font-size:12px">${esc(r.contact)||'-'}</span></td>
+    <td style="font-size:12px">${esc(r.reason)||'-'}</td>
     <td><a href="#" onclick="showDetail('${r.id}');return false" style="color:var(--blue)">${active.length}종 ${reqQty.toLocaleString()}개 ▶</a></td>
     <td>${r.status==='distributed' ? `<b style="color:var(--green)">${distActive.length}종 ${distQty.toLocaleString()}개</b>` : '-'}</td>
     <td>
@@ -2026,8 +2141,8 @@ function showMergeRequestsModal(idsSet) {
     return;
   }
   const itemSummary = r => r.items.filter(i=>!i.cancelled).map(i=>{
-    if (bucket === 'distributed') return `${i.name} ${(i.distributedQty ?? i.qty).toLocaleString()}개`;
-    return `${i.name} ${i.qty}개`;
+    if (bucket === 'distributed') return `${esc(i.name)} ${(i.distributedQty ?? i.qty).toLocaleString()}개`;
+    return `${esc(i.name)} ${i.qty}개`;
   }).join(', ') || '(항목 없음)';
   const introText = bucket === 'distributed'
     ? '기준이 될 신청을 하나 선택하세요. 나머지 신청의 배부 물품이 기준 신청으로 합쳐지고, 나머지 신청은 취소 처리됩니다. (재고는 이미 각자 배부 시점에 차감되어 있어 추가로 차감되지 않고, 이미 등록된 결과보고 링크가 있다면 기준 신청의 메모로 그대로 옮겨집니다)'
@@ -2035,13 +2150,13 @@ function showMergeRequestsModal(idsSet) {
   document.getElementById('modal-title').textContent = bucket === 'distributed' ? '🔗 배부 합치기' : '🔗 신청 합치기';
   document.getElementById('modal-body').innerHTML = `
     <p style="margin-bottom:10px;font-size:13px;color:var(--muted)">${introText}</p>
-    ${excluded.length ? `<p style="margin-bottom:10px;font-size:12px;color:var(--red)">⚠️ 상태가 다른 ${excluded.length}건은 대상에서 제외됩니다: ${excluded.map(r=>r.name).join(', ')}</p>` : ''}
+    ${excluded.length ? `<p style="margin-bottom:10px;font-size:12px;color:var(--red)">⚠️ 상태가 다른 ${excluded.length}건은 대상에서 제외됩니다: ${excluded.map(r=>esc(r.name)).join(', ')}</p>` : ''}
     <div style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto">
       ${eligible.map((r,i)=>`
         <label style="display:flex;gap:10px;align-items:flex-start;padding:10px;border:1.5px solid var(--border);border-radius:8px;cursor:pointer">
           <input type="radio" name="merge-target" value="${r.id}" ${i===0?'checked':''} style="margin-top:3px">
           <div>
-            <b>${r.name||'-'}</b> <span style="color:var(--muted);font-size:12px">(${r.dept||'-'} · ${r.createdAt})</span>
+            <b>${esc(r.name)||'-'}</b> <span style="color:var(--muted);font-size:12px">(${esc(r.dept)||'-'} · ${r.createdAt})</span>
             <div style="font-size:12px;color:var(--muted);margin-top:2px">${itemSummary(r)}</div>
           </div>
         </label>
@@ -2119,15 +2234,15 @@ function showDetail(id) {
 
     return `<div style="padding:8px 4px;border-bottom:1px solid var(--border)">
       <div style="display:grid;grid-template-columns:1fr 65px 105px auto auto;gap:6px;align-items:center;font-size:13px">
-        <span style="font-weight:500">${i.name}</span>
+        <span style="font-weight:500">${esc(i.name)}</span>
         <span style="text-align:right;color:var(--muted)">${i.qty.toLocaleString()}개</span>
         <span style="text-align:right;font-weight:600;color:var(--brown)">${total?total.toLocaleString()+'원':'-'}</span>
         ${badge}
         ${actionBtn}
       </div>
-      ${i.detail?`<div style="font-size:11px;color:var(--blue);margin-top:3px">📌 ${i.detail}</div>`:''}
+      ${i.detail?`<div style="font-size:11px;color:var(--blue);margin-top:3px">📌 ${esc(i.detail)}</div>`:''}
       ${distributed?`<div style="font-size:11px;color:var(--muted);margin-top:2px">📋 신청 ${i.qty.toLocaleString()}개 · <span style="color:var(--green);font-weight:700">실배부 ${(i.distributedQty ?? i.qty).toLocaleString()}개</span>${i.returnedQty?` · <span style="color:#8B5CF6;font-weight:700">↩️ 반품 ${i.returnedQty.toLocaleString()}개</span>`:''}</div>`:''}
-      ${i.distributeDate||i.distributeMethod?`<div style="font-size:11px;color:var(--muted);margin-top:2px">🚚 ${i.distributeDate||''} ${i.distributeMethod?'· '+i.distributeMethod:''}</div>`:''}
+      ${i.distributeDate||i.distributeMethod?`<div style="font-size:11px;color:var(--muted);margin-top:2px">🚚 ${i.distributeDate||''} ${i.distributeMethod?'· '+esc(i.distributeMethod):''}</div>`:''}
       ${canEditQty?`
       <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
         <label style="font-size:11px;color:var(--muted);white-space:nowrap">수량 수정</label>
@@ -2178,11 +2293,11 @@ function showDetail(id) {
 
   document.getElementById('modal-body').innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:13px;background:var(--card);border-radius:8px;padding:12px 14px;margin-bottom:14px">
-      <div><span style="color:var(--muted)">본부</span> &nbsp;<b>${r.dept||'-'}</b></div>
-      <div><span style="color:var(--muted)">팀</span> &nbsp;<b>${r.team||'-'}</b></div>
-      <div><span style="color:var(--muted)">이름</span> &nbsp;<b>${r.name||'-'}</b></div>
-      <div><span style="color:var(--muted)">연락처</span> &nbsp;<b>${r.contact||'-'}</b></div>
-      <div style="grid-column:1/-1"><span style="color:var(--muted)">사용처</span> &nbsp;<b>${r.reason||'-'}</b></div>
+      <div><span style="color:var(--muted)">본부</span> &nbsp;<b>${esc(r.dept)||'-'}</b></div>
+      <div><span style="color:var(--muted)">팀</span> &nbsp;<b>${esc(r.team)||'-'}</b></div>
+      <div><span style="color:var(--muted)">이름</span> &nbsp;<b>${esc(r.name)||'-'}</b></div>
+      <div><span style="color:var(--muted)">연락처</span> &nbsp;<b>${esc(r.contact)||'-'}</b></div>
+      <div style="grid-column:1/-1"><span style="color:var(--muted)">사용처</span> &nbsp;<b>${esc(r.reason)||'-'}</b></div>
       ${isAdmin ? `
       <div><span style="color:var(--muted)">수취예정일</span> &nbsp;<input id="sched-pickupDate-${r.id}" type="date" value="${dateOnly(r.pickupDate)}" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
       <div><span style="color:var(--muted)">사용예정일</span> &nbsp;<input id="sched-useDate-${r.id}" type="date" value="${dateOnly(r.useDate)}" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
@@ -2377,12 +2492,14 @@ async function submitFeedback() {
 
 async function loadFeedback() {
   try {
-    const res = await api('getFeedback', {});
-    if (!res.ok) return;
     const isAdmin = currentUser?.role === 'admin';
     const wrap = document.getElementById('feedback-list-wrap');
     const list = document.getElementById('feedback-list');
-    if (!isAdmin || res.feedbacks.length === 0) { wrap.style.display = 'none'; return; }
+    // 피드백 목록은 관리자만 볼 수 있다(서버도 관리자만 허용) — 일반 직원은 요청 자체를 보내지 않는다
+    if (!isAdmin) { wrap.style.display = 'none'; return; }
+    const res = await api('getFeedback', {});
+    if (!res.ok) return;
+    if (res.feedbacks.length === 0) { wrap.style.display = 'none'; return; }
     wrap.style.display = '';
     const stars = n => '★'.repeat(n) + '☆'.repeat(5-n);
     list.innerHTML = res.feedbacks.map(f => `
@@ -2390,11 +2507,11 @@ async function loadFeedback() {
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
           <div>
             <span style="color:var(--kakao);font-size:16px">${stars(f.rating)}</span>
-            <span style="margin-left:8px;font-size:12px;background:var(--border);padding:2px 8px;border-radius:10px">${f.category}</span>
+            <span style="margin-left:8px;font-size:12px;background:var(--border);padding:2px 8px;border-radius:10px">${esc(f.category)}</span>
           </div>
-          <span style="font-size:11px;color:var(--muted)">${f.name} · ${f.createdAt}</span>
+          <span style="font-size:11px;color:var(--muted)">${esc(f.name)} · ${f.createdAt}</span>
         </div>
-        <div style="font-size:14px;line-height:1.6;color:var(--text)">${f.text}</div>
+        <div style="font-size:14px;line-height:1.6;color:var(--text)">${esc(f.text)}</div>
       </div>`).join('');
   } catch(e) {}
 }
@@ -2468,10 +2585,12 @@ async function refreshAdmin(auto) {
   // 30초 자동 새로고침 때마다 매번 돌리면 신청 건수가 늘어날수록 계속 느려진다.
   // 재고는 이미 각 처리 시점에 실시간으로 반영되므로, 자동 새로고침에서는 생략하고
   // 사람이 직접 "새로고침"을 눌렀을 때만 재계산한다.
+  window.__bgRefresh = !!auto;
   if (!auto) { try { await api('syncStock'); } catch(e) {} }
   // 사람이 직접 누른 새로고침은 캐시를 건너뛰고 항상 최신 값을 받아온다(force) —
   // 자동 새로고침(auto)은 캐시를 그대로 활용해 서버 부담을 줄인다.
-  await Promise.all([loadStockFromAPI(), loadRequestsFromAPI(!auto)]);
+  try { await Promise.all([loadStockFromAPI(), loadRequestsFromAPI(!auto)]); }
+  finally { window.__bgRefresh = false; }
   renderAdmin();
   updateStats();
   const now = new Date().toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -2563,7 +2682,7 @@ function showDistributeModal(id) {
       return `<div style="border-bottom:1px solid var(--border);padding:10px 4px;opacity:.55" id="dist-wrap-${idx}">
         <div style="display:grid;grid-template-columns:24px 1fr 70px 105px;gap:6px;align-items:center">
           <span></span>
-          <span style="font-weight:500;font-size:13px;text-decoration:line-through">${item.name}</span>
+          <span style="font-weight:500;font-size:13px;text-decoration:line-through">${esc(item.name)}</span>
           <span style="text-align:right;color:var(--muted);font-size:13px">${item.qty.toLocaleString()}개</span>
           <span style="text-align:right;font-size:11px;background:#f8d7da;color:#721c24;padding:2px 6px;border-radius:10px;justify-self:end">취소됨</span>
         </div>
@@ -2575,11 +2694,11 @@ function showDistributeModal(id) {
       <!-- 상단: 체크 + 제품명 + 신청수량 + 금액 -->
       <div style="display:grid;grid-template-columns:24px 1fr 70px 105px;gap:6px;align-items:center" id="dist-row-${idx}" class="${done?'done':''}">
         <input type="checkbox" id="dist-chk-${idx}" ${done?'checked':''} onchange="toggleDistRow(${idx})">
-        <span style="font-weight:500;font-size:13px">${item.name}</span>
+        <span style="font-weight:500;font-size:13px">${esc(item.name)}</span>
         <span style="text-align:right;color:var(--muted);font-size:13px">신청 ${item.qty.toLocaleString()}개</span>
         <span style="text-align:right;font-weight:600;font-size:13px;color:var(--brown)">${total?total.toLocaleString()+'원':'-'}</span>
       </div>
-      ${item.detail?`<div style="font-size:11px;color:var(--blue);padding-left:28px;margin-top:3px">📌 ${item.detail}</div>`:''}
+      ${item.detail?`<div style="font-size:11px;color:var(--blue);padding-left:28px;margin-top:3px">📌 ${esc(item.detail)}</div>`:''}
       <!-- 하단: 실제 배부수량 + 배부일 + 배부방법 -->
       <div style="display:grid;grid-template-columns:110px auto 1fr 1fr auto;gap:6px;align-items:center;margin-top:7px;padding-left:28px">
         <span style="font-size:11px;color:var(--muted);white-space:nowrap">실제 배부수량</span>
@@ -2587,13 +2706,13 @@ function showDistributeModal(id) {
           style="width:64px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
         <input id="dist-date-${idx}" type="date" value="${item.distributeDate||''}" title="배부일"
           style="padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
-        <input id="dist-method-${idx}" type="text" value="${item.distributeMethod||''}" placeholder="배부방법 (예: 직접전달, 택배)"
+        <input id="dist-method-${idx}" type="text" value="${esc(item.distributeMethod||'')}" placeholder="배부방법 (예: 직접전달, 택배)"
           style="padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;outline:none">
         <button onclick="copyRowToAll(${idx})" title="이 값을 전체에 복사" style="padding:4px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:#fff;cursor:pointer;white-space:nowrap">↑전체복사</button>
       </div>
       <div style="padding-left:28px;margin-top:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:11px;color:var(--muted)">수취예정일: <b>${reqDate||'-'}</b></span>
-        ${done?`<span style="font-size:11px;color:var(--green)">✓ 배부완료 (실배부 ${distQty}개) ${item.distributeDate||''} ${item.distributeMethod?'· '+item.distributeMethod:''}</span>`:''}
+        ${done?`<span style="font-size:11px;color:var(--green)">✓ 배부완료 (실배부 ${distQty}개) ${item.distributeDate||''} ${item.distributeMethod?'· '+esc(item.distributeMethod):''}</span>`:''}
       </div>
     </div>`;
   }).join('');
@@ -2714,7 +2833,7 @@ function showDeferStep(id, r, distributed, dateMap, methodMap, qtyMap, leftover)
     const item = r.items[idx];
     return `<label style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border);cursor:pointer">
       <input type="checkbox" id="defer-chk-${idx}">
-      <span style="flex:1;font-size:13px">${item.name}</span>
+      <span style="flex:1;font-size:13px">${esc(item.name)}</span>
       <span style="color:var(--muted);font-size:13px">${item.qty.toLocaleString()}개</span>
     </label>`;
   }).join('');
@@ -2834,7 +2953,7 @@ function showReportUpload(id) {
   const existingLinks = reportLinksHtml(r.adminNote, { boxed: true, fontSize: '13px', marginTop: '6px' });
   document.getElementById('modal-title').textContent = '📎 결과보고서 업로드';
   document.getElementById('modal-body').innerHTML = `
-    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">${r.name} (${r.team}) · ${r.reason}</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">${esc(r.name)} (${esc(r.team)}) · ${esc(r.reason)}</p>
     ${existingLinks?`<div style="margin-bottom:14px">
       <p style="font-size:12px;font-weight:700;margin-bottom:4px">📂 이미 등록된 파일</p>
       ${existingLinks}
@@ -2885,6 +3004,9 @@ async function submitReportUpload(id) {
     await loadRequestsFromAPI();
     closeModal();
     toast('✅ 결과보고서 업로드 완료!');
+    if (result.sharing === 'private') {
+      alert('⚠️ 파일은 저장됐지만 "월드비전 내부 공유"로 설정하지 못해 비공개로 저장되었습니다.\n관리자가 구글 드라이브에서 직접 공유해주어야 다른 사람이 열 수 있습니다.');
+    }
     renderAdminHistory();
   } catch(e) { toast('❌ 오류: '+e.message); }
   finally {
@@ -2916,8 +3038,11 @@ function toast(msg, ms) {
 
 // ── INIT ──
 document.querySelectorAll('.page').forEach(p=>p.style.display='none');
+const _verifyToken = new URLSearchParams(location.search).get('verifyToken');
 const _resetToken = new URLSearchParams(location.search).get('resetToken');
-if (_resetToken) {
+if (_verifyToken) {
+  handleVerifyLink(_verifyToken);
+} else if (_resetToken) {
   // 비밀번호 재설정 링크로 들어온 경우 — 자동로그인보다 우선해서 재설정 화면부터 띄운다.
   showResetPasswordScreen(_resetToken);
 } else {

@@ -746,6 +746,12 @@ function onOpen() {
     .addItem('결과보고 요청 메일 지금 발송', 'sendResultReportReminders')
     .addItem('[테스트] 장민혁님께 결과보고 안내 메일 발송', 'testSendReportEmailToJangMinhyuk')
     .addSeparator()
+    .addSeparator()
+    .addItem('🔐 서버 인증 강제 켜기', 'enableAuthEnforcement')
+    .addItem('🔐 서버 인증 강제 끄기(비상용)', 'disableAuthEnforcement')
+    .addItem('🔐 기존 결과보고 파일 공유 제한(도메인)', 'restrictExistingReportFiles')
+    .addItem('🔐 접속로그 점검(최근 7일)', 'reviewAccessLog')
+    .addSeparator()
     .addItem('갇힌 신청건 상태 일괄 수정(일부취소+나머지배부완료)', 'fixStuckApprovedStatuses')
     .addItem('레거시 배부완료 건 실제배부수량 보정', 'fixLegacyDistributedItems')
     .addToUi();
@@ -856,12 +862,29 @@ function initSheets() {
 }
 
 // ── 라우터 ────────────────────────────────────────────────────
+function jsonOut_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
 function doPost(e) {
-  const data = JSON.parse(e.postData.contents);
+  let data;
+  try { data = JSON.parse(e.postData.contents); }
+  catch (parseErr) { return jsonOut_({ ok: false, error: '잘못된 요청입니다.' }); }
   let result;
+  let session = null;
   try {
     const { action } = data;
-    if      (action === 'register')      result = register(data);
+    // 접근통제: 로그인 여부·역할·본인 신청 여부를 서버에서 확인한다 (checkAccess_ 참고)
+    const gate = checkAccess_(action, data);
+    if (!gate.ok) {
+      auditLog_(action, gate.session, data, gate.result, 'deny');
+      return jsonOut_(gate.result);
+    }
+    session = gate.session;
+
+    if      (action === 'logout')        result = logout(data, session);
+    else if (action === 'register')      result = register(data);
+    else if (action === 'verifyEmail')   result = verifyEmail(data);
+    else if (action === 'resendVerification') result = resendVerification(data);
     else if (action === 'login')         result = login(data);
     else if (action === 'findAccountByEmail')     result = findAccountByEmail(data);
     else if (action === 'requestPasswordReset')   result = requestPasswordReset(data);
@@ -925,70 +948,442 @@ function doPost(e) {
       try { scheduleDeferredRefresh(); }
       catch (schedErr) { Logger.log('지연 갱신 예약 실패: ' + schedErr.message); }
     }
+    // 활동 중인 사용자의 세션을 연장 (화면이 자동으로 백그라운드 갱신하는 요청 bg:true는 연장하지 않는다)
+    if (session && action !== 'logout' && PUBLIC_ACTIONS.indexOf(action) < 0 && !data.bg && result && typeof result === 'object') {
+      const refreshed = maybeRefreshSession_(session);
+      if (refreshed) result.sessionToken = refreshed;
+    }
   } catch(err) {
     result = { ok: false, error: err.message };
   }
-  return ContentService
-    .createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
+  auditLog_(data && data.action, session, data, result);
+  return jsonOut_(result);
 }
 
 function doGet() {
-  return ContentService
-    .createTextOutput(JSON.stringify({ ok: true, msg: '카카오 배부시스템 API' }))
-    .setMimeType(ContentService.MimeType.JSON);
+  return jsonOut_({ ok: true, msg: '카카오 배부시스템 API', authEnforced: isAuthEnforced_() });
 }
 
-// ── 회원가입 ─────────────────────────────────────────────────
-function register({ name, email, hash }) {
-  if (!name || !hash) return { ok: false, error: '이름과 비밀번호를 입력해주세요.' };
-  email = String(email || '').trim();
-  if (!/^[^\s@]+@worldvision\.or\.kr$/i.test(email))
+// ============================================================
+//  인증 · 세션 · 접근통제 (인공지능 업무 보안 지침 제6~8조 준용)
+// ============================================================
+// 로그인하면 서버가 서명된 세션 토큰을 발급하고, 이후 모든 요청은 이 토큰으로 사용자·역할을 확인한다.
+// 클라이언트가 보낸 role / name / adminName 값은 토큰이 있는 요청에서는 더 이상 믿지 않는다.
+//
+// 전환 기간 안전장치: Script Properties의 AUTH_ENFORCED가 'true'일 때만 "토큰 없는 요청"을 거부한다.
+// 배포 직후에는 꺼져 있어(기존 화면이 그대로 동작) 프런트를 먼저 올린 뒤 enableAuthEnforcement()로 켠다.
+const AUTH_IDLE_SEC          = 30 * 60;      // 마지막 사용 후 30분이면 만료
+const AUTH_MAX_SEC           = 6 * 60 * 60;  // 로그인 후 절대 6시간 (CacheService 최대 보관시간과 맞춤)
+const AUTH_REFRESH_BELOW_SEC = 20 * 60;      // 남은 시간이 이보다 적을 때만 토큰을 새로 발급
+const LOGIN_MAX_FAILS        = 5;            // 연속 실패 허용 횟수
+const LOGIN_LOCK_SEC         = 15 * 60;      // 잠금 시간
+
+const PUBLIC_ACTIONS = ['register', 'login', 'findAccountByEmail', 'requestPasswordReset', 'resetPasswordWithToken', 'verifyEmail', 'resendVerification'];
+// 관리자만 실행할 수 있는 동작 (그 외 로그인 사용자 전용: getStock, getRequests, submitRequest, submitFeedback, logout)
+const ADMIN_ONLY_ACTIONS = [
+  'updateRequest', 'updateRequestSchedule', 'saveDispatchMemo', 'updateStock', 'setProductBlocked',
+  'syncStock', 'generateReport', 'approveItems', 'updateItemQty', 'returnDistributedQty',
+  'editDistributedQty', 'addAdminItem', 'distributeItems', 'mergeRequests',
+  'confirmCancelItem', 'rejectCancelItem', 'getFeedback'
+];
+// 본인 신청만 다룰 수 있는 동작 → 신청 ID가 들어 있는 필드 이름 (관리자는 예외)
+const OWNER_ACTION_ID_FIELD = {
+  cancelRequest: 'id', cancelItems: 'id', requestCancelItem: 'id',
+  saveDistLog: 'id', uploadReport: 'id', mergeIntoRequest: 'existingId'
+};
+
+function isAuthEnforced_() {
+  try { return PropertiesService.getScriptProperties().getProperty('AUTH_ENFORCED') === 'true'; }
+  catch (e) { return false; }
+}
+function enableAuthEnforcement() {
+  PropertiesService.getScriptProperties().setProperty('AUTH_ENFORCED', 'true');
+  Logger.log('서버 인증 강제: 켜짐');
+  try { SpreadsheetApp.getUi().alert('서버 인증 강제를 켰습니다.\n\n이제 로그인(토큰) 없이 들어오는 요청은 모두 거부됩니다.\n이미 열려 있던 화면은 새로고침해야 합니다.'); } catch (e) {}
+}
+function disableAuthEnforcement() {
+  PropertiesService.getScriptProperties().setProperty('AUTH_ENFORCED', 'false');
+  Logger.log('서버 인증 강제: 꺼짐');
+  try { SpreadsheetApp.getUi().alert('서버 인증 강제를 껐습니다. (비상용 — 토큰 없는 요청이 다시 허용됩니다)'); } catch (e) {}
+}
+
+// ── 비밀 값(서명 키, 비밀번호 후추) — 시트가 아니라 Script Properties에만 보관 ──
+const _propMemo = {};
+function getOrCreateSecret_(key) {
+  if (_propMemo[key]) return _propMemo[key];
+  const props = PropertiesService.getScriptProperties();
+  let v = props.getProperty(key);
+  if (!v) {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(10000);
+    try {
+      v = props.getProperty(key);
+      if (!v) {
+        v = (Utilities.getUuid() + Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+        props.setProperty(key, v);
+      }
+    } finally { lock.releaseLock(); }
+  }
+  _propMemo[key] = v;
+  return v;
+}
+
+function toHex_(bytes) { return bytes.map(b => ('0' + (b & 0xff).toString(16)).slice(-2)).join(''); }
+function sha256Hex_(str) {
+  return toHex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(str), Utilities.Charset.UTF_8));
+}
+function safeEqual_(a, b) {
+  a = String(a); b = String(b);
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+function nowSec_() { return Math.floor(Date.now() / 1000); }
+function normNameServer_(s) { return String(s || '').trim().replace(/\s+/g, ' '); }
+function escapeHtml_(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ── 세션 토큰: base64url(JSON) + '.' + HMAC-SHA256 서명 (서버에 세션 저장소가 필요 없음) ──
+function signBody_(body) {
+  return Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(body, getOrCreateSecret_('AUTH_SECRET')));
+}
+function issueSession_(user, prev) {
+  const now = nowSec_();
+  const i0 = prev ? prev.i0 : now;
+  const payload = {
+    n: user.name, r: user.role, e: user.email || '',
+    j: prev ? prev.j : Utilities.getUuid(),
+    i0: i0,
+    x: Math.min(now + AUTH_IDLE_SEC, i0 + AUTH_MAX_SEC)
+  };
+  const body = Utilities.base64EncodeWebSafe(JSON.stringify(payload), Utilities.Charset.UTF_8);
+  return body + '.' + signBody_(body);
+}
+function verifySession_(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  if (!safeEqual_(signBody_(parts[0]), parts[1])) return null;
+  let p;
+  try { p = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString('UTF-8')); }
+  catch (e) { return null; }
+  const now = nowSec_();
+  if (!p || !p.n || !p.x || !p.i0 || now > p.x || now > p.i0 + AUTH_MAX_SEC) return null;
+  try {
+    const cache = CacheService.getScriptCache();
+    if (cache.get('rvj_' + p.j)) return null;                                   // 로그아웃된 토큰
+    const rv = cache.get('rvu_' + sha256Hex_(p.n).slice(0, 32));                // 비밀번호 변경 이전에 발급된 토큰
+    if (rv && p.i0 <= Number(rv)) return null;
+  } catch (e) {}
+  return { name: p.n, role: p.r, email: p.e || '', jti: p.j, i0: p.i0, x: p.x };
+}
+// 활동 중인 사용자는 만료 전에 토큰을 갱신해 준다(남은 시간이 충분하면 그대로 둔다).
+function maybeRefreshSession_(sess) {
+  const now = nowSec_();
+  if (sess.x - now > AUTH_REFRESH_BELOW_SEC) return null;
+  if (now >= sess.i0 + AUTH_MAX_SEC) return null;
+  return issueSession_({ name: sess.name, role: sess.role, email: sess.email }, { i0: sess.i0, j: sess.jti });
+}
+function revokeSession_(sess) {
+  if (!sess) return;
+  try { CacheService.getScriptCache().put('rvj_' + sess.jti, '1', Math.max(60, Math.min(21600, sess.x - nowSec_()))); } catch (e) {}
+}
+function revokeUserSessions_(name) {
+  try { CacheService.getScriptCache().put('rvu_' + sha256Hex_(name).slice(0, 32), String(nowSec_()), 21600); } catch (e) {}
+}
+
+// ── 요청 한 건에 대한 접근 검사 ─────────────────────────────────
+// 반환: { ok:true, session } 또는 { ok:false, result }  (session이 있으면 data를 서버 기준으로 덮어쓴다)
+function checkAccess_(action, data) {
+  const sess = verifySession_(data.sessionToken);
+  if (PUBLIC_ACTIONS.indexOf(action) >= 0) return { ok: true, session: sess };
+
+  if (!sess) {
+    if (isAuthEnforced_()) {
+      return { ok: false, result: { ok: false, code: 'AUTH_REQUIRED', error: '로그인이 필요하거나 로그인이 만료되었습니다. 다시 로그인해주세요.' } };
+    }
+    return { ok: true, session: null }; // 전환 기간: 토큰 없는 기존 화면은 예전처럼 동작
+  }
+
+  const forbidden = msg => ({ ok: false, session: sess, result: { ok: false, code: 'FORBIDDEN', error: msg || '권한이 없습니다.' } });
+  const isAdmin = sess.role === 'admin';
+
+  if (ADMIN_ONLY_ACTIONS.indexOf(action) >= 0) {
+    if (!isAdmin) return forbidden('관리자 권한이 필요합니다.');
+    data.adminName = sess.name; // 관리자 이름은 클라이언트 값이 아니라 토큰 기준
+  }
+  const idField = OWNER_ACTION_ID_FIELD[action];
+  if (idField && !isAdmin) {
+    const owner = requestOwnerName_(data[idField]);
+    if (owner === null || normNameServer_(owner) !== normNameServer_(sess.name)) {
+      return forbidden('본인의 신청만 처리할 수 있습니다.');
+    }
+  }
+  if (action === 'getRequests') { data.name = sess.name; data.role = sess.role; }
+  if (action === 'submitRequest' && !isAdmin) data.name = sess.name;
+  return { ok: true, session: sess };
+}
+
+// 신청 ID로 신청인 이름만 가볍게 조회 (전체 시트를 읽지 않고 A열 → 해당 행의 E열)
+function requestOwnerName_(id) {
+  if (id === undefined || id === null || id === '') return null;
+  const s = sheet(SHEET_REQ);
+  const last = s.getLastRow();
+  if (last < 2) return null;
+  const ids = s.getRange(2, 1, last - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === String(id)) return String(s.getRange(i + 2, 5).getValue());
+  }
+  return null;
+}
+
+function logout(data, sess) { revokeSession_(sess); return { ok: true }; }
+
+// ── 비밀번호 규칙 (지침 제7조) — 프런트의 validatePasswordPolicy와 동일하게 유지 ──
+function validatePasswordPolicy_(pw, name) {
+  pw = String(pw || '');
+  const kinds = [/[A-Za-z]/, /[0-9]/, /[^A-Za-z0-9]/].filter(re => re.test(pw)).length;
+  const okLen = kinds >= 3 ? pw.length >= 8 : (kinds === 2 ? pw.length >= 10 : false);
+  if (!okLen) return '비밀번호는 영문·숫자·특수문자를 모두 섞어 8자 이상, 또는 두 종류 이상을 섞어 10자 이상이어야 합니다.';
+  const nm = normNameServer_(name);
+  if (nm && pw.toLowerCase().indexOf(nm.toLowerCase()) >= 0) return '이름이 포함된 비밀번호는 사용할 수 없습니다.';
+  const low = pw.toLowerCase();
+  for (let i = 0; i + 2 < low.length; i++) {
+    const c1 = low.charCodeAt(i), c2 = low.charCodeAt(i + 1), c3 = low.charCodeAt(i + 2);
+    const isAlnum = c => (c >= 48 && c <= 57) || (c >= 97 && c <= 122);
+    if (!(isAlnum(c1) && isAlnum(c2) && isAlnum(c3))) continue;
+    if ((c2 - c1 === 1 && c3 - c2 === 1) || (c1 - c2 === 1 && c2 - c3 === 1) || (c1 === c2 && c2 === c3)) {
+      return '3자리 이상 연속된 문자·숫자(예: abc, 123, 111)는 사용할 수 없습니다.';
+    }
+  }
+  return '';
+}
+
+// ── 비밀번호 저장: 'v2$솔트$HMAC(후추+솔트, 클라이언트해시)' — 시트만 유출돼도 값만으로 로그인할 수 없다 ──
+function passwordHashV2_(clientHash, salt) {
+  const sig = Utilities.computeHmacSha256Signature(String(clientHash), getOrCreateSecret_('PW_PEPPER') + salt);
+  return 'v2$' + salt + '$' + toHex_(sig);
+}
+function newPasswordRecord_(clientHash) {
+  return passwordHashV2_(clientHash, Utilities.getUuid().replace(/-/g, ''));
+}
+function verifyPassword_(stored, clientHash) {
+  stored = String(stored || '');
+  if (stored.indexOf('v2$') === 0) {
+    const parts = stored.split('$');
+    if (parts.length !== 3) return false;
+    return safeEqual_(passwordHashV2_(clientHash, parts[1]), stored);
+  }
+  return safeEqual_(stored, String(clientHash)); // 예전 형식(SHA-256) — 첫 로그인 때 v2로 바꾼다
+}
+// 새 화면은 평문 비밀번호(HTTPS)를 보낸다 — 서버가 규칙을 검사하고 직접 해시한다. 구버전 화면은 hash만 보낸다.
+function clientHashFrom_(data) {
+  if (data.password !== undefined && data.password !== null && data.password !== '') return sha256Hex_(data.password);
+  return String(data.hash || '');
+}
+const CLIENT_OUTDATED = { ok: false, code: 'CLIENT_OUTDATED', error: '화면이 오래되었습니다. 새로고침(Cmd/Ctrl + Shift + R) 후 다시 시도해주세요.' };
+
+// ── 로그인 실패 잠금 (지침 제8조③) ───────────────────────────────
+function loginFailKey_(name) { return 'lf_' + sha256Hex_(String(name)).slice(0, 32); }
+function isLoginLocked_(name) {
+  try { return Number(CacheService.getScriptCache().get(loginFailKey_(name)) || 0) >= LOGIN_MAX_FAILS; }
+  catch (e) { return false; }
+}
+function recordLoginFail_(name) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const k = loginFailKey_(name);
+    cache.put(k, String((Number(cache.get(k)) || 0) + 1), LOGIN_LOCK_SEC);
+  } catch (e) {}
+}
+function clearLoginFails_(name) {
+  try { CacheService.getScriptCache().remove(loginFailKey_(name)); } catch (e) {}
+}
+// 같은 대상에게 짧은 시간에 메일이 반복 발송되는 것을 막는다(메일 폭탄 방지). true면 이번엔 건너뜀.
+function rateLimited_(key, sec) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const k = 'rl_' + sha256Hex_(key).slice(0, 32);
+    if (cache.get(k)) return true;
+    cache.put(k, '1', sec);
+  } catch (e) {}
+  return false;
+}
+
+// ── 회원가입 (이메일 소유 확인 후 사용 가능) ─────────────────────
+// 계정 시트 열: 0 이름, 1 비밀번호, 2 권한, 3 이메일, 4 가입일시, 5 재설정토큰, 6 재설정만료,
+//               7 인증상태('N'=인증대기 / 'Y'=인증완료 / 빈칸=예전 계정·관리자가 직접 만든 계정=인증완료로 취급),
+//               8 인증토큰, 9 인증만료
+// @worldvision.or.kr 형식만 맞으면 아무 주소로나 가입할 수 있으므로, 그 주소로 보낸 메일의 링크를 눌러야 로그인할 수 있다.
+const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
+function sendVerificationMail_(email, name, token) {
+  const url = `${APP_URL}?verifyToken=${encodeURIComponent(token)}`;
+  MailApp.sendEmail({
+    to: email,
+    subject: '[카카오프렌즈 GIK] 가입 이메일 인증 안내',
+    htmlBody: `
+      <div style="font-family:sans-serif; line-height:1.7">
+        <h2>✉️ 이메일 인증</h2>
+        <p>안녕하세요, ${escapeHtml_(name)}님.<br>아래 링크를 누르면 가입이 완료됩니다. (24시간 이내에만 유효합니다)</p>
+        <p><a href="${url}">${url}</a></p>
+        <p style="color:#888; font-size:12px; margin-top:20px">본인이 가입한 적이 없다면 이 메일은 무시해주셔도 됩니다.</p>
+      </div>`
+  });
+}
+function register(data) {
+  const nm = textField_('이름', data.name, 30, { required: true });
+  if (nm.err) return { ok: false, error: nm.err };
+  const name = nm.v;
+  const email = String(data.email || '').trim();
+  const hasPlain = data.password !== undefined && data.password !== null && data.password !== '';
+  if (!hasPlain && isAuthEnforced_()) return CLIENT_OUTDATED;
+  if (hasPlain) {
+    const perr = validatePasswordPolicy_(data.password, name);
+    if (perr) return { ok: false, error: perr };
+  }
+  const clientHash = clientHashFrom_(data);
+  if (!name || !clientHash) return { ok: false, error: '이름과 비밀번호를 입력해주세요.' };
+  if (email.length > 120 || !/^[^\s@<>"']+@worldvision\.or\.kr$/i.test(email))
     return { ok: false, error: 'worldvision.or.kr 메일로만 가입할 수 있습니다.' };
+
+  const token = Utilities.getUuid();
+  const expiresAt = String(Date.now() + VERIFY_TTL_MS);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = sheet(SHEET_ACCT);
+    const rows = s.getDataRange().getValues();
+    let existing = -1;
+    for (let i = 1; i < rows.length; i++) { if (rows[i][0] === name) { existing = i; break; } }
+    const record = [name, newPasswordRecord_(clientHash), 'team', email, new Date().toLocaleString('ko-KR'), '', '', 'N', token, expiresAt];
+    if (existing >= 0) {
+      // 아직 이메일 인증을 못 끝낸 같은 이름은 새로 가입하는 사람의 정보로 덮어쓴다(이름 선점으로 본인이 못 가입하는 것을 막음)
+      if (String(rows[existing][7]) !== 'N') return { ok: false, error: `"${name}" 이름으로 이미 가입된 계정이 있습니다.` };
+      s.getRange(existing + 1, 1, 1, record.length).setValues([record]);
+    } else {
+      s.appendRow(record);
+    }
+  } finally { lock.releaseLock(); }
+
+  try { sendVerificationMail_(email, name, token); }
+  catch (e) {
+    Logger.log('인증 메일 발송 실패: ' + e.message);
+    return { ok: false, pendingVerification: true, error: '가입 정보는 저장되었지만 인증 메일을 보내지 못했습니다. 잠시 후 로그인 화면에서 "인증 메일 다시 받기"를 눌러주세요.' };
+  }
+  return { ok: false, pendingVerification: true, error: `${email} 로 인증 메일을 보냈습니다. 메일의 링크를 누르면 가입이 완료됩니다. (24시간 이내)` };
+}
+
+// 인증 메일의 링크를 눌렀을 때
+function verifyEmail({ token }) {
+  if (!token) return { ok: false, error: '잘못된 인증 링크입니다.' };
   const s = sheet(SHEET_ACCT);
   const rows = s.getDataRange().getValues();
-  if (rows.some(r => r[0] === name))
-    return { ok: false, error: `"${name}" 이름으로 이미 가입된 계정이 있습니다.` };
-  s.appendRow([name, hash, 'team', email || '', new Date().toLocaleString('ko-KR')]);
-  return { ok: true, role: 'team', name, email };
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][7]) !== 'N' || String(rows[i][8] || '') !== String(token)) continue;
+    if (!rows[i][9] || Date.now() > Number(rows[i][9])) {
+      return { ok: false, error: '인증 링크가 만료되었습니다. 로그인 화면에서 "인증 메일 다시 받기"를 눌러주세요.' };
+    }
+    s.getRange(i + 1, 8).setValue('Y');
+    s.getRange(i + 1, 9).setValue('');
+    s.getRange(i + 1, 10).setValue('');
+    return { ok: true, name: rows[i][0] };
+  }
+  return { ok: false, error: '유효하지 않거나 이미 사용된 인증 링크입니다. 이미 인증하셨다면 로그인해주세요.' };
+}
+
+// 인증 메일 다시 받기 — 계정 존재 여부와 상관없이 같은 응답, 1분에 한 번만
+function resendVerification({ name }) {
+  const GENERIC = { ok: true, msg: '인증 대기 중인 계정이면 인증 메일을 다시 보냈습니다.' };
+  const nm = cleanText_(name).slice(0, 30);
+  if (!nm) return { ok: false, error: '이름을 입력해주세요.' };
+  if (rateLimited_('ver:' + nm, 60)) return GENERIC;
+  const s = sheet(SHEET_ACCT);
+  const rows = s.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] !== nm || String(rows[i][7]) !== 'N') continue;
+    const token = Utilities.getUuid();
+    s.getRange(i + 1, 9).setValue(token);
+    s.getRange(i + 1, 10).setValue(String(Date.now() + VERIFY_TTL_MS));
+    try { sendVerificationMail_(String(rows[i][3]).trim(), nm, token); } catch (e) { Logger.log('인증 메일 재발송 실패: ' + e.message); }
+    break;
+  }
+  return GENERIC;
 }
 
 // ── 로그인 ───────────────────────────────────────────────────
-function login({ name, hash }) {
-  if (!name || !hash) return { ok: false, error: '이름과 비밀번호를 입력해주세요.' };
-  const rows = sheet(SHEET_ACCT).getDataRange().getValues().slice(1);
-  const acc = rows.find(r => r[0] === name);
-  if (!acc) return { ok: false, error: `"${name}" 계정이 없습니다. 회원가입을 먼저 해주세요.` };
-  if (acc[1] !== hash) return { ok: false, error: '비밀번호가 올바르지 않습니다.' };
-  return { ok: true, name: acc[0], role: acc[2], email: acc[3] || '' };
+function login(data) {
+  const name = cleanText_(data.name);
+  const hasPlain = data.password !== undefined && data.password !== null && data.password !== '';
+  if (!hasPlain && isAuthEnforced_()) return CLIENT_OUTDATED;
+  const clientHash = clientHashFrom_(data);
+  if (!name || !clientHash) return { ok: false, error: '이름과 비밀번호를 입력해주세요.' };
+
+  const s = sheet(SHEET_ACCT);
+  const rows = s.getDataRange().getValues();
+  let idx = -1;
+  for (let i = 1; i < rows.length; i++) { if (rows[i][0] === name) { idx = i; break; } }
+  // 관리자 계정은 15분 잠금 규정에서 제외한다(관리자가 로그인하지 못해 업무가 멈추는 것을 막기 위함).
+  // 대신 틀릴 때마다 1초씩 지연시켜 무차별 대입 속도를 늦춘다.
+  const isAdminAcct = idx >= 0 && String(rows[idx][2]) === 'admin';
+
+  if (!isAdminAcct && isLoginLocked_(name)) {
+    return { ok: false, locked: true, error: '로그인에 여러 번 실패하여 잠시 잠겼습니다. 15분 뒤에 다시 시도해주세요.' };
+  }
+  // 계정이 없든 비밀번호가 틀리든 같은 문구·같은 실패 횟수 처리 — 계정 존재 여부를 알려주지 않는다
+  if (idx < 0 || !verifyPassword_(rows[idx][1], clientHash)) {
+    if (isAdminAcct) Utilities.sleep(1000);
+    else recordLoginFail_(name);
+    return { ok: false, error: '이름 또는 비밀번호가 올바르지 않습니다.' };
+  }
+  clearLoginFails_(name);
+  if (String(rows[idx][7]) === 'N') {
+    return { ok: false, code: 'UNVERIFIED', error: '이메일 인증이 아직 완료되지 않았습니다. 가입할 때 받은 인증 메일의 링크를 눌러주세요.' };
+  }
+  if (String(rows[idx][1]).indexOf('v2$') !== 0) {
+    s.getRange(idx + 1, 2).setValue(newPasswordRecord_(clientHash)); // 예전 형식 → 솔트+후추 형식으로 자동 전환
+  }
+  const user = { name: rows[idx][0], role: rows[idx][2], email: rows[idx][3] || '' };
+  return { ok: true, name: user.name, role: user.role, email: user.email, sessionToken: issueSession_(user) };
 }
 
 // ── 아이디(이름) 찾기 ────────────────────────────────────────
-// 로그인 아이디가 곧 "이름"이라 계정 자체를 잊는 경우는 드물지만, 이메일로
-// 등록된 이름을 다시 확인할 수 있게 한다. 내부 직원 전용 도구라 계정 존재
-// 여부를 굳이 숨기지 않고(다른 액션들도 마찬가지) 바로 알려준다.
+// 화면에는 계정 존재 여부를 알려주지 않고, 가입된 이메일로만 이름을 메일로 보낸다.
 function findAccountByEmail({ email }) {
+  const GENERIC = { ok: true, msg: '입력하신 이메일로 가입된 계정이 있으면 안내 메일을 보냈습니다.' };
   if (!email) return { ok: false, error: '이메일을 입력해주세요.' };
-  const rows = sheet(SHEET_ACCT).getDataRange().getValues().slice(1);
   const wanted = String(email).trim().toLowerCase();
-  const names = rows
-    .filter(r => String(r[3] || '').trim().toLowerCase() === wanted)
-    .map(r => r[0]);
-  if (names.length === 0) return { ok: false, error: '해당 이메일로 가입된 계정을 찾을 수 없습니다.' };
-  return { ok: true, names };
+  if (rateLimited_('fid:' + wanted, 60)) return GENERIC;
+  const rows = sheet(SHEET_ACCT).getDataRange().getValues().slice(1);
+  const names = rows.filter(r => String(r[3] || '').trim().toLowerCase() === wanted).map(r => r[0]);
+  if (names.length > 0) {
+    MailApp.sendEmail({
+      to: String(email).trim(),
+      subject: '[카카오프렌즈 GIK] 가입 계정(이름) 안내',
+      htmlBody: `<div style="font-family:sans-serif; line-height:1.7">
+        <h2>🔍 가입 계정 안내</h2>
+        <p>이 이메일로 가입된 계정(로그인 이름)은 다음과 같습니다.</p>
+        <p><b>${names.map(escapeHtml_).join(', ')}</b></p>
+        <p style="color:#888; font-size:12px; margin-top:20px">본인이 요청하지 않았다면 이 메일은 무시해주셔도 됩니다.</p>
+      </div>`
+    });
+  }
+  return GENERIC;
 }
 
 // ── 비밀번호 재설정 요청 ───────────────────────────────────────
-// 비밀번호는 해시로만 저장돼 있어 복구가 불가능하므로, 이름+이메일이
-// 일치하면 계정 시트에 임시 토큰(30분 유효)을 발급해 재설정 링크를 메일로
-// 보낸다. 토큰/만료시각은 계정 시트의 6·7번째 열에 그때그때 채워 넣는다
-// (헤더 재정의 없이도 기존 시트에 바로 쓸 수 있게 — dispatchMemo 열과 동일한 방식).
+// 계정 존재 여부와 상관없이 같은 응답을 준다. 일치하는 계정이 있을 때만 메일이 나간다.
+// 토큰/만료시각은 계정 시트의 6·7번째 열에 그때그때 채워 넣는다.
 function requestPasswordReset({ name, email }) {
+  const GENERIC = { ok: true, msg: '입력하신 정보와 일치하는 계정이 있으면 재설정 메일을 보냈습니다.' };
+  name = cleanText_(name);
   if (!name || !email) return { ok: false, error: '이름과 이메일을 입력해주세요.' };
+  const wantedEmail = String(email).trim().toLowerCase();
+  if (rateLimited_('rst:' + name + '|' + wantedEmail, 60)) return GENERIC;
+
   const s = sheet(SHEET_ACCT);
   const rows = s.getDataRange().getValues();
-  const wantedEmail = String(email).trim().toLowerCase();
-
   for (let i = 1; i < rows.length; i++) {
     if (rows[i][0] !== name) continue;
     if (String(rows[i][3] || '').trim().toLowerCase() !== wantedEmail) continue;
@@ -1000,52 +1395,200 @@ function requestPasswordReset({ name, email }) {
 
     const resetUrl = `${APP_URL}?resetToken=${encodeURIComponent(token)}`;
     MailApp.sendEmail({
-      to: email,
+      to: String(rows[i][3]).trim(),
       subject: '[카카오프렌즈 GIK] 비밀번호 재설정 안내',
       htmlBody: `
         <div style="font-family:sans-serif; line-height:1.7">
           <h2>🔑 비밀번호 재설정</h2>
-          <p>안녕하세요, ${name}님.<br>아래 링크를 눌러 새 비밀번호를 설정해주세요. (30분 이내에만 유효합니다)</p>
+          <p>안녕하세요, ${escapeHtml_(name)}님.<br>아래 링크를 눌러 새 비밀번호를 설정해주세요. (30분 이내에만 유효합니다)</p>
           <p><a href="${resetUrl}">${resetUrl}</a></p>
           <p style="color:#888; font-size:12px; margin-top:20px">본인이 요청하지 않았다면 이 메일은 무시해주셔도 됩니다.</p>
         </div>
       `
     });
-    return { ok: true };
+    break;
   }
-  return { ok: false, error: '이름과 이메일이 일치하는 계정을 찾을 수 없습니다.' };
+  return GENERIC;
 }
 
 // ── 비밀번호 재설정 실행(토큰 검증) ───────────────────────────
-function resetPasswordWithToken({ token, hash }) {
-  if (!token || !hash) return { ok: false, error: '잘못된 요청입니다.' };
+function resetPasswordWithToken(data) {
+  const token = data.token;
+  const hasPlain = data.password !== undefined && data.password !== null && data.password !== '';
+  if (!hasPlain && isAuthEnforced_()) return CLIENT_OUTDATED;
+  const clientHash = clientHashFrom_(data);
+  if (!token || !clientHash) return { ok: false, error: '잘못된 요청입니다.' };
+
   const s = sheet(SHEET_ACCT);
   const rows = s.getDataRange().getValues();
-
   for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][5] || '') !== token) continue;
+    if (!rows[i][5] || String(rows[i][5]) !== String(token)) continue;
 
     const expiresAt = Number(rows[i][6] || 0);
     if (!expiresAt || Date.now() > expiresAt) {
       return { ok: false, error: '재설정 링크가 만료되었습니다. 다시 요청해주세요.' };
     }
-
-    s.getRange(i + 1, 2).setValue(hash); // 비밀번호해시
+    if (hasPlain) {
+      const perr = validatePasswordPolicy_(data.password, rows[i][0]);
+      if (perr) return { ok: false, error: perr };
+    }
+    s.getRange(i + 1, 2).setValue(newPasswordRecord_(clientHash));
     s.getRange(i + 1, 6).setValue('');   // 토큰 소진(재사용 방지)
     s.getRange(i + 1, 7).setValue('');
+    if (String(rows[i][7]) === 'N') {    // 등록한 이메일로 받은 링크로 재설정했으므로 이메일 소유가 확인됨
+      s.getRange(i + 1, 8).setValue('Y');
+      s.getRange(i + 1, 9).setValue('');
+      s.getRange(i + 1, 10).setValue('');
+    }
+    revokeUserSessions_(rows[i][0]);     // 이전에 발급된 로그인 세션은 모두 무효화
+    clearLoginFails_(rows[i][0]);
     return { ok: true, name: rows[i][0] };
   }
   return { ok: false, error: '유효하지 않은 재설정 링크입니다.' };
 }
 
+// ============================================================
+//  입력 정리·검증 (인공지능 업무 보안 지침 제9조③④ 준용)
+// ============================================================
+// 사용자가 보낸 문자열은 저장하기 전에 항상 정리한다. (화면에서도 별도로 이스케이프한다 — 이중 방어)
+//  - 제어문자 제거, < > 는 전각 문자로 바꿔 HTML 태그로 해석되지 않게 한다.
+//  - 맨 앞이 = + - @ 이면 구글 시트가 수식으로 실행할 수 있으므로 전각 문자로 바꿔 무력화한다.
+const LEAD_FULLWIDTH = { '=': '＝', '+': '＋', '-': '－', '@': '＠' };
+function cleanText_(v, multiline) {
+  let s = String(v === undefined || v === null ? '' : v);
+  s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+  s = multiline ? s.replace(/\r\n?/g, '\n') : s.replace(/[\r\n\t]+/g, ' ');
+  s = s.replace(/</g, '＜').replace(/>/g, '＞').trim();
+  if (s && LEAD_FULLWIDTH[s.charAt(0)]) s = LEAD_FULLWIDTH[s.charAt(0)] + s.slice(1);
+  return s;
+}
+// 문자열 입력 검증: { v: 정리된 값 } 또는 { err: 오류 문구 }
+function textField_(label, v, max, opts) {
+  opts = opts || {};
+  const s = cleanText_(v, opts.multiline);
+  if (opts.required && !s) return { err: `${label}을(를) 입력해주세요.` };
+  if (s.length > max) return { err: `${label}은(는) ${max}자 이내로 입력해주세요.` };
+  return { v: s };
+}
+function isoDateOrEmpty_(v) {
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  if (s === '') return { v: '' };
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? { v: s } : { err: '날짜 형식이 올바르지 않습니다.' };
+}
+const MAX_ITEM_QTY = 100000;
+function intInRange_(v, min, max) {
+  const n = Number(v);
+  return (isFinite(n) && Math.floor(n) === n && n >= min && n <= max) ? n : null;
+}
+// 신청 물품 목록: 알려진 필드만 남기고(화면이 임의로 distributed/approved 같은 상태값을 심지 못하게) 값을 검증한다.
+function sanitizeItems_(items) {
+  if (!Array.isArray(items) || items.length === 0) return { err: '신청할 제품이 없습니다.' };
+  if (items.length > 200) return { err: '한 번에 신청할 수 있는 제품 종류는 200개까지입니다.' };
+  const out = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (!it || typeof it !== 'object') return { err: '제품 정보가 올바르지 않습니다.' };
+    const num = String(it.num === undefined || it.num === null ? '' : it.num).trim();
+    if (!/^\d{1,4}$/.test(num)) return { err: '제품 번호가 올바르지 않습니다.' };
+    const qty = intInRange_(it.qty, 1, MAX_ITEM_QTY);
+    if (qty === null) return { err: `수량은 1 이상 ${MAX_ITEM_QTY.toLocaleString()} 이하의 정수로 입력해주세요.` };
+    const nm = textField_('제품명', it.name, 150, { required: true }); if (nm.err) return nm;
+    const dt = textField_('상세사업', it.detail, 300);                  if (dt.err) return dt;
+    const price = Math.min(Math.max(Number(it.price) || 0, 0), 1e9);
+    out.push({ num: num, name: nm.v, qty: qty, price: price, total: price * qty, detail: dt.v });
+  }
+  return { items: out };
+}
+function validateEmailField_(v) {
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  if (s === '') return { v: '' };
+  if (s.length > 120 || !/^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(s)) return { err: '이메일 형식이 올바르지 않습니다.' };
+  return { v: s };
+}
+function validateSubmitInput_(d) {
+  const f = {};
+  const checks = [
+    ['dept', '본부', 60, {}], ['team', '팀', 60, {}], ['name', '이름', 30, { required: true }],
+    ['contact', '연락처', 40, {}], ['reason', '사용처', 300, { required: true }]
+  ];
+  for (let i = 0; i < checks.length; i++) {
+    const c = checks[i];
+    const r = textField_(c[1], d[c[0]], c[2], c[3]);
+    if (r.err) return { ok: false, error: r.err };
+    f[c[0]] = r.v;
+  }
+  const em = validateEmailField_(d.email);            if (em.err) return { ok: false, error: em.err };
+  const pd = isoDateOrEmpty_(d.pickupDate);           if (pd.err) return { ok: false, error: '수취예정일 ' + pd.err };
+  const ud = isoDateOrEmpty_(d.useDate);              if (ud.err) return { ok: false, error: '사용예정일 ' + ud.err };
+  const it = sanitizeItems_(d.items);                 if (it.err) return { ok: false, error: it.err };
+  return { ok: true, data: Object.assign({}, d, f, { email: em.v, pickupDate: pd.v, useDate: ud.v, items: it.items }) };
+}
+
+// ============================================================
+//  접속·작업 로그 (지침 제12조: 1년 이상 보관, 부적절 행위 점검)
+// ============================================================
+// '접속로그' 시트에 로그인·가입·재설정과 모든 데이터 변경 동작, 그리고 권한 거부를 남긴다.
+// 1년 이상 보관해야 하므로 이 시트의 행을 지우지 않는다. (웹앱은 접속 IP를 알 수 없어 IP는 기록되지 않는다)
+const SHEET_AUDIT = '접속로그';
+const AUDIT_SKIP_ACTIONS = ['getRequests', 'getStock']; // 조회는 변경이 없고 양이 많아 기록하지 않는다
+function ensureAuditSheet_() {
+  const ss = openSS();
+  let s = ss.getSheetByName(SHEET_AUDIT);
+  if (!s) {
+    s = ss.insertSheet(SHEET_AUDIT);
+    s.appendRow(['일시', '사용자', '권한', '동작', '대상', '결과', '비고']);
+    s.getRange(1, 1, 1, 7).setBackground('#3C1E1E').setFontColor('#FEE500').setFontWeight('bold');
+    s.getRange(1, 8).setValue('※ 보안 지침 제12조에 따라 1년 이상 보관 — 행을 삭제하지 마세요.');
+    s.setFrozenRows(1);
+    s.setColumnWidth(1, 150); s.setColumnWidth(7, 320);
+    s.getRange('A:A').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  }
+  return s;
+}
+// kind: 'deny'(권한 거부) | 생략(처리 결과 기준)
+function auditLog_(action, session, data, result, kind) {
+  try {
+    if (AUDIT_SKIP_ACTIONS.indexOf(action) >= 0) return;
+    data = data || {};
+    const attempted = cleanText_(data.name || '').slice(0, 60);
+    const user = session ? session.name : (attempted || '(미로그인)');
+    const role = session ? session.role : ((result && result.role) || '');
+    const target = cleanText_(data.id || data.existingId || data.targetId || data.num || '').slice(0, 40);
+    let outcome = '성공';
+    if (kind === 'deny') outcome = '거부';
+    else if (result && result.ok === false) outcome = result.pendingVerification ? '성공' : '실패';
+    const note = cleanText_((result && (result.code || '')) + ' ' + ((result && result.error) || '')).slice(0, 120);
+    // 로그인하지 않은 상태의 반복 실패·거부가 로그를 가득 채우지 않도록 같은 대상은 10초에 한 번만 기록한다
+    if (!session && outcome !== '성공' && rateLimited_('audit:' + action + ':' + user, 10)) return;
+    ensureAuditSheet_().appendRow([new Date(), user, role, action, target, outcome, note]);
+  } catch (e) { Logger.log('접속로그 기록 실패: ' + e.message); }
+}
+// 메뉴용: 최근 7일 접속로그에서 이상 징후를 요약해 보여준다 (지침 제12조②)
+function reviewAccessLog() {
+  const s = openSS().getSheetByName(SHEET_AUDIT);
+  if (!s || s.getLastRow() < 2) { try { SpreadsheetApp.getUi().alert('접속로그가 아직 없습니다.'); } catch (e) {} return; }
+  const since = Date.now() - 7 * 24 * 3600 * 1000;
+  const rows = s.getRange(2, 1, s.getLastRow() - 1, 7).getValues().filter(r => r[0] instanceof Date && r[0].getTime() >= since);
+  const count = (arr, keyFn) => arr.reduce((m, r) => { const k = keyFn(r); m[k] = (m[k] || 0) + 1; return m; }, {});
+  const fails = count(rows.filter(r => r[3] === 'login' && r[5] === '실패'), r => r[1]);
+  const denies = count(rows.filter(r => r[5] === '거부'), r => r[3] + ' (' + r[1] + ')');
+  const adminActs = count(rows.filter(r => r[2] === 'admin' && r[5] === '성공'), r => r[1]);
+  const top = o => Object.keys(o).sort((a, b) => o[b] - o[a]).slice(0, 8).map(k => `  - ${k}: ${o[k]}건`).join('\n') || '  (없음)';
+  const msg = `[최근 7일 접속로그 점검] 총 ${rows.length}건\n\n로그인 실패 많은 계정\n${top(fails)}\n\n권한 거부(비정상 접근 시도)\n${top(denies)}\n\n관리자 작업 건수\n${top(adminActs)}`;
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
+}
+
 // ── 신청 제출 (신청 즉시 재고 차감) ──────────────────────────
-function submitRequest({ dept, team, name, contact, email, reason, pickupDate, useDate, items }) {
+function submitRequest(rawData) {
+  const checked = validateSubmitInput_(rawData || {});
+  if (!checked.ok) return { ok: false, error: checked.error };
   // 동시에 여러 명이 신청할 때 "재고 확인 → 차감" 사이에 끼어들어
   // 둘 다 통과해버리는 경쟁 상태(race condition)를 막기 위한 잠금
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    return submitRequest_(arguments[0]);
+    return submitRequest_(checked.data);
   } finally {
     lock.releaseLock();
   }
@@ -1251,7 +1794,7 @@ function saveDispatchMemo({ id, memo }) {
   const rows = s.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][0]) !== String(id)) continue;
-    s.getRange(i + 1, 17).setValue(memo || '');
+    s.getRange(i + 1, 17).setValue(cleanText_(memo).slice(0, 300));
     return { ok: true };
   }
   return { ok: false, error: '신청을 찾을 수 없습니다.' };
@@ -1286,6 +1829,10 @@ function updateRequestSchedule({ id, pickupDate, useDate, plannedDate }) {
 
 // ── 신청 상태 변경 + 이메일 발송 ─────────────────────────────
 function updateRequest({ id, status, adminNote }) {
+  if (['pending', 'approved', 'rejected', 'distributed', 'cancelled'].indexOf(status) < 0) {
+    return { ok: false, error: '올바르지 않은 상태 값입니다.' };
+  }
+  if (adminNote !== undefined) adminNote = cleanText_(adminNote, true).slice(0, 1000);
   const s = sheet(SHEET_REQ);
   const rows = s.getDataRange().getValues();
 
@@ -1560,8 +2107,8 @@ function logStockChange(meta, num, delta, afterQty) {
       new Date().toLocaleString('ko-KR'),
       String(num).padStart(3, '0'),
       meta.reqId || '',
-      meta.name || '',
-      meta.reason || '',
+      cleanText_(meta.name),
+      cleanText_(meta.reason),
       (delta > 0 ? '+' : '') + delta,
       afterQty
     ]);
@@ -1629,7 +2176,7 @@ function deductStockBatch(items, meta) {
     const finalVal = Math.max(0, next);
     rows[rowIdx][2] = finalVal; // 메모리상에서만 갱신, 실제 쓰기는 마지막에 한 번에
     // 품목마다 사유를 다르게 남기고 싶으면 item.__reason에 넣어두면 우선 사용됨(없으면 공통 meta.reason)
-    changeLogRows.push([now, paddedNum, meta.reqId || '', meta.name || '', item.__reason || meta.reason || '', '-' + item.qty, finalVal]);
+    changeLogRows.push([now, paddedNum, meta.reqId || '', cleanText_(meta.name), cleanText_(item.__reason || meta.reason || ''), '-' + item.qty, finalVal]);
   });
 
   // C열(잔여재고) 전체를 한 번에 다시 쓴다 — 바뀐 행만 골라 쓰는 것보다
@@ -1726,6 +2273,9 @@ function createDeferredRequest({ dept, team, name, contact, email, reason, origi
 // ── 신청 병합 ────────────────────────────────────────────────
 // 수취예정일·사용예정일이 같은 기존 신청에 새 항목들을 합쳐 넣는다.
 function mergeIntoRequest({ existingId, items }) {
+  const cleaned = sanitizeItems_(items);
+  if (cleaned.err) return { ok: false, error: cleaned.err };
+  items = cleaned.items;
   const stockResult = getStock({ fresh: true });
   const blocked = [];
   const insufficient = [];
@@ -1920,8 +2470,9 @@ function mergeRequests({ targetId, sourceIds, adminName }) {
 // 수량이 줄면 그만큼 재고 복구, 늘면 그만큼 재고 추가 차감.
 // 결과 재고가 0 이하가 되면 stockWarning:true 로 알려 프런트에서 경고 팝업을 띄우게 한다.
 function updateItemQty({ id, idx, qty, adminName, deferReduced }) {
-  qty = Number(qty);
-  if (isNaN(qty) || qty < 0) return { ok: false, error: '올바른 수량을 입력하세요.' };
+  const q = intInRange_(qty, 0, MAX_ITEM_QTY);
+  if (q === null) return { ok: false, error: '올바른 수량을 입력하세요.' };
+  qty = q;
 
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -2134,7 +2685,10 @@ function saveDistLog({ id, idx, distLog }) {
     if (!items[idx].distributed) return { ok: false, error: '배부완료된 항목만 기록할 수 있습니다.' };
 
     const cleanLog = (Array.isArray(distLog) ? distLog : []).slice(0, 10)
-      .map(e => ({ dest: String(e.dest || '').trim(), qty: Number(e.qty) || 0 }))
+      .map(e => ({
+        dest: cleanText_(e && e.dest).slice(0, 100),
+        qty: Math.min(Math.max(Math.floor(Number(e && e.qty) || 0), 0), 1000000)
+      }))
       .filter(e => e.dest || e.qty);
     items[idx].distLog = cleanLog;
 
@@ -2150,9 +2704,15 @@ function saveDistLog({ id, idx, distLog }) {
 // 기존 신청 건에 원래 없던 항목을 새로 추가하고, 그 자리에서 바로 배부완료 처리한다.
 // (신청 시점에 재고가 차감되는 다른 항목들과 달리, 이 항목은 지급 시점에 재고를 차감한다)
 function addAdminItem({ id, num, name, price, qty, distributeDate, distributeMethod, adminName }) {
-  qty = Number(qty);
-  if (isNaN(qty) || qty <= 0) return { ok: false, error: '올바른 수량을 입력하세요.' };
+  const q = intInRange_(qty, 1, MAX_ITEM_QTY);
+  if (q === null) return { ok: false, error: '올바른 수량을 입력하세요.' };
+  qty = q;
   if (!num || !name) return { ok: false, error: '제품을 선택하세요.' };
+  if (!/^\d{1,4}$/.test(String(num).trim())) return { ok: false, error: '제품 번호가 올바르지 않습니다.' };
+  name = cleanText_(name).slice(0, 150);
+  distributeMethod = cleanText_(distributeMethod).slice(0, 100);
+  const dOk = isoDateOrEmpty_(distributeDate);
+  distributeDate = dOk.err ? '' : dOk.v;
 
   const paddedNum = String(num).padStart(3, '0');
   const available = currentStockOf(paddedNum);
@@ -2640,14 +3200,58 @@ function rejectCancelItem({ id, idx }) {
 }
 
 // ── 결과보고서 구글 드라이브 업로드 ─────────────────────────────
+// 업로드 파일은 전용 폴더에 두고, 링크를 아는 "같은 도메인(월드비전) 로그인 사용자"만 볼 수 있게 한다.
+// (예전에는 링크만 알면 누구나 볼 수 있는 공개 공유였다 — 수혜자 명단에 이름·연락처가 들어 있어 위험)
+// 소유 계정이 도메인 공유를 지원하지 않으면 비공개로 저장하고 sharing:'private'로 알려준다.
+function getReportFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('REPORT_FOLDER_ID');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
+  const folder = DriveApp.createFolder('GIK_결과보고_업로드');
+  props.setProperty('REPORT_FOLDER_ID', folder.getId());
+  return folder;
+}
+function createReportFile_(blob) {
+  const file = getReportFolder_().createFile(blob);
+  let sharing = 'domain';
+  try {
+    file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (e) {
+    sharing = 'private';
+    try { file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE); } catch (e2) {}
+  }
+  return { file, sharing };
+}
+const UPLOAD_ALLOWED_EXT = ['xlsx', 'xls', 'csv', 'pdf', 'doc', 'docx', 'pptx'];
+const UPLOAD_MAX_B64_LEN = 14 * 1000 * 1000; // base64 문자 수 기준 약 10MB
+function checkUpload_(label, b64, fname) {
+  const name = cleanText_(String(fname || '').split(/[\\/]/).pop()).slice(0, 100);
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (!name || UPLOAD_ALLOWED_EXT.indexOf(ext) < 0) {
+    return { err: `${label}: 업로드할 수 없는 파일 형식입니다. (가능: ${UPLOAD_ALLOWED_EXT.join(', ')})` };
+  }
+  if (String(b64 || '').length > UPLOAD_MAX_B64_LEN) return { err: `${label}: 파일이 너무 큽니다. (10MB 이하)` };
+  return { name, ext };
+}
 function uploadReport({ id, listFile, listFileName, docFile, docFileName }) {
   const links = [];
+  let sharing = 'domain';
+  if (listFile && listFileName) {
+    const chk = checkUpload_('배부 명단 파일', listFile, listFileName);
+    if (chk.err) return { ok: false, error: chk.err };
+    listFileName = chk.name;
+  }
+  if (docFile && docFileName) {
+    const chk = checkUpload_('결과보고서 파일', docFile, docFileName);
+    if (chk.err) return { ok: false, error: chk.err };
+    docFileName = chk.name;
+  }
 
   if (listFile && listFileName) {
     const blob = Utilities.newBlob(Utilities.base64Decode(listFile), MimeType.MICROSOFT_EXCEL, listFileName);
-    const file = DriveApp.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    links.push('명단: ' + file.getUrl());
+    const made = createReportFile_(blob);
+    if (made.sharing === 'private') sharing = 'private';
+    links.push('명단: ' + made.file.getUrl());
   }
 
   if (docFile && docFileName) {
@@ -2657,9 +3261,9 @@ function uploadReport({ id, listFile, listFileName, docFile, docFileName }) {
       : lower.endsWith('.pptx') ? MimeType.MICROSOFT_POWERPOINT
       : MimeType.MICROSOFT_WORD;
     const blob = Utilities.newBlob(Utilities.base64Decode(docFile), mime, docFileName);
-    const file = DriveApp.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    links.push('보고서: ' + file.getUrl());
+    const made = createReportFile_(blob);
+    if (made.sharing === 'private') sharing = 'private';
+    links.push('보고서: ' + made.file.getUrl());
   }
 
   if (links.length === 0) return { ok: false, error: '업로드할 파일이 없습니다.' };
@@ -2673,9 +3277,32 @@ function uploadReport({ id, listFile, listFileName, docFile, docFileName }) {
     const noteCol = isOld ? 12 : 14;
     const existing = String(rows[i][noteCol] || '');
     s.getRange(i + 1, noteCol + 1).setValue(existing ? existing + '\n' + links.join('\n') : links.join('\n'));
-    return { ok: true, links };
+    return { ok: true, links, sharing };
   }
   return { ok: false, error: '신청을 찾을 수 없습니다.' };
+}
+
+// 1회 실행용(메뉴 또는 편집기): 이미 올라간 결과보고 파일의 공유를 "링크 아는 누구나" → "같은 도메인 사용자"로 바꾼다.
+function restrictExistingReportFiles() {
+  const rows = sheet(SHEET_REQ).getDataRange().getValues().slice(1);
+  const ids = {};
+  rows.forEach(r => {
+    [r[12], r[14]].forEach(note => {
+      String(note || '').split('\n').forEach(line => {
+        const m = line.match(/\/d\/([A-Za-z0-9_-]{15,})/) || line.match(/[?&]id=([A-Za-z0-9_-]{15,})/);
+        if (m) ids[m[1]] = true;
+      });
+    });
+  });
+  const list = Object.keys(ids);
+  let ok = 0, fail = 0;
+  list.forEach(fid => {
+    try { DriveApp.getFileById(fid).setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW); ok++; }
+    catch (e) { fail++; Logger.log('공유 제한 실패: ' + fid + ' — ' + e.message); }
+  });
+  const msg = `결과보고 파일 ${list.length}개 중 ${ok}개를 도메인 공유로 제한했습니다.` + (fail ? `\n실패 ${fail}개(권한 없음/삭제됨) — 실행 로그를 확인하세요.` : '');
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
 }
 
 function testAll() {
@@ -2720,7 +3347,14 @@ function testEmail() {
 
 // ── 피드백 제출 ───────────────────────────────────────────────
 function submitFeedback({ name, dept, rating, category, text }) {
-  if (!text) return { ok: false, error: '의견을 입력해주세요.' };
+  const t = textField_('의견', text, 2000, { required: true, multiline: true });
+  if (t.err) return { ok: false, error: t.err };
+  text = t.v;
+  name = cleanText_(name).slice(0, 30);
+  dept = cleanText_(dept).slice(0, 60);
+  category = cleanText_(category).slice(0, 40);
+  const stars = intInRange_(rating, 1, 5);
+  rating = stars === null ? '' : stars;
   const ss = openSS();
   let s = ss.getSheetByName('피드백');
   if (!s) {
@@ -3020,8 +3654,8 @@ function generateAuditSheets() {
 
       if (item.adminAdded) {
         adminAddedRows.push([
-          r[1], r[4], r[2], r[3], r[5], item.name, num, item.qty,
-          item.distributeDate || '', item.distributeMethod || ''
+          r[1], cleanText_(r[4]), cleanText_(r[2]), cleanText_(r[3]), cleanText_(r[5]), cleanText_(item.name), num, item.qty,
+          item.distributeDate || '', cleanText_(item.distributeMethod)
         ]);
       }
 
@@ -3061,7 +3695,7 @@ function generateAuditSheets() {
     pendingItemsByNum[num].forEach(p => {
       riskRows.push([
         num, (stockMap[num] && stockMap[num].name) || p.itemName, distRemaining,
-        p.reqId, p.createdAt, p.name, p.dept, p.team, p.contact, p.qty
+        p.reqId, p.createdAt, cleanText_(p.name), cleanText_(p.dept), cleanText_(p.team), cleanText_(p.contact), p.qty
       ]);
     });
   });
