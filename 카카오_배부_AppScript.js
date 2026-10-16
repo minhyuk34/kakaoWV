@@ -737,6 +737,7 @@ function onOpen() {
     .addItem('지금 새로고침', 'generateReport')
     .addItem('재고만 강제 재계산(리포트 갱신 없이)', 'forceSyncStockFromMenu')
     .addItem('재고 불일치 진단 시트 생성(추가지급내역/재고부족위험신청)', 'generateAuditSheets')
+    .addItem('📊 배부 실적 요약(집계만)', 'showDistributionStats')
     .addSeparator()
     .addItem('수취예정 리마인더 지금 발송', 'sendUpcomingPickupReminder')
     .addItem('수취예정 리마인더 매주 월요일 자동발송 등록', 'setupWeeklyPickupReminderTrigger')
@@ -1614,6 +1615,96 @@ function reviewAccessLog() {
   const msg = `[최근 7일 접속로그 점검] 총 ${rows.length}건\n\n로그인 실패 많은 계정\n${top(fails)}\n\n권한 거부(비정상 접근 시도)\n${top(denies)}\n\n관리자 작업 건수\n${top(adminActs)}`;
   Logger.log(msg);
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
+}
+
+// ============================================================
+//  배부 실적 요약 (집계만 — 이름·연락처·이메일 등 개인정보는 계산에도 출력에도 쓰지 않는다)
+// ============================================================
+// 총 후원 수량, 신청·배부 건수와 수량, 배부받은 본부·팀 수, 팀당 평균 배부 수량을 계산한다.
+//  - 신청: 취소·반려를 뺀 신청(합쳐진 신청은 원본이 '취소'로 남으므로 한 번만 센다)
+//  - 배부: 항목 단위로 배부완료(distributed)인 것만 실배부수량(반품 반영)으로 합산
+function fmtNum_(n) { return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+function computeDistributionStats_() {
+  let totalOriginal = 0, totalCurrent = 0, productCount = 0;
+  sheet(SHEET_STK).getDataRange().getValues().slice(1).forEach(r => {
+    if (!r[0]) return;
+    productCount++;
+    const cur = Number(r[2]) || 0;
+    totalCurrent += cur;
+    totalOriginal += Number(r[3]) || cur;
+  });
+
+  const st = { requests: 0, requestedQty: 0, requestsWithDist: 0, distQty: 0, completedRequests: 0 };
+  const allTeams = {}, allDepts = {}, distTeams = {}, distDepts = {}, distPeople = {}, teamQty = {};
+  let firstId = null, lastId = null;
+  sheet(SHEET_REQ).getDataRange().getValues().slice(1).forEach(r => {
+    if (!r[0]) return;
+    const isOld = String(r[8]).trim().startsWith('[') || String(r[8]).trim().startsWith('{');
+    const status = String(r[isOld ? 10 : 12] || '');
+    if (status === 'cancelled' || status === 'rejected') return;
+    let items = [];
+    try { items = JSON.parse(r[isOld ? 8 : 10] || '[]'); } catch (e) {}
+    items = items.filter(i => !i.cancelled);
+
+    st.requests++;
+    if (status === 'distributed') st.completedRequests++;
+    st.requestedQty += items.reduce((a, i) => a + (Number(i.qty) || 0), 0);
+    const dept = String(r[2] || '(미기재)'), team = String(r[3] || '(미기재)');
+    allDepts[dept] = true; allTeams[dept + '|' + team] = true;
+
+    const dq = items.filter(i => i.distributed).reduce((a, i) => a + (Number(i.distributedQty ?? i.qty) || 0), 0);
+    if (items.some(i => i.distributed)) {
+      st.requestsWithDist++;
+      st.distQty += dq;
+      distDepts[dept] = true; distTeams[dept + '|' + team] = true;
+      distPeople[normNameServer_(r[4])] = true;
+      teamQty[dept + '|' + team] = (teamQty[dept + '|' + team] || 0) + dq;
+    }
+    const idNum = Number(r[0]);
+    if (idNum > 1e12) { if (firstId === null || idNum < firstId) firstId = idNum; if (lastId === null || idNum > lastId) lastId = idNum; }
+  });
+
+  const teamVals = Object.keys(teamQty).map(k => teamQty[k]).sort((a, b) => a - b);
+  const teamCnt = teamVals.length;
+  const median = teamCnt === 0 ? 0 : (teamCnt % 2 ? teamVals[(teamCnt - 1) / 2] : (teamVals[teamCnt / 2 - 1] + teamVals[teamCnt / 2]) / 2);
+  const fmtDate = ms => ms === null ? '-' : Utilities.formatDate(new Date(ms), 'Asia/Seoul', 'yyyy-MM-dd');
+  return {
+    productCount, totalOriginal, totalCurrent,
+    requests: st.requests, completedRequests: st.completedRequests, requestedQty: st.requestedQty,
+    requestsWithDist: st.requestsWithDist, distQty: st.distQty,
+    distRate: totalOriginal ? st.distQty / totalOriginal * 100 : 0,
+    distDepts: Object.keys(distDepts).length, distTeams: teamCnt, distPeople: Object.keys(distPeople).length,
+    allDepts: Object.keys(allDepts).length, allTeams: Object.keys(allTeams).length,
+    avgPerTeam: teamCnt ? st.distQty / teamCnt : 0, medianPerTeam: median, maxPerTeam: teamCnt ? teamVals[teamCnt - 1] : 0,
+    avgPerRequest: st.requestsWithDist ? st.distQty / st.requestsWithDist : 0,
+    firstDate: fmtDate(firstId), lastDate: fmtDate(lastId)
+  };
+}
+function showDistributionStats() {
+  const x = computeDistributionStats_();
+  const msg =
+`[배부 실적 요약 — 집계만]
+
+■ 후원물품
+- 총 후원 수량(원래재고 합계): ${fmtNum_(x.totalOriginal)}개 (${x.productCount}개 품목)
+- 현재 남은 재고: ${fmtNum_(x.totalCurrent)}개
+
+■ 신청 (취소·반려 제외)
+- 신청 건수: ${fmtNum_(x.requests)}건 (그중 배부 완료 처리된 신청 ${fmtNum_(x.completedRequests)}건)
+- 신청 수량 합계: ${fmtNum_(x.requestedQty)}개
+- 신청한 본부 ${x.allDepts}곳 / 팀(부서) ${x.allTeams}곳
+
+■ 배부
+- 배부가 이루어진 신청: ${fmtNum_(x.requestsWithDist)}건
+- 배부 수량 합계: ${fmtNum_(x.distQty)}개 (총 후원 수량의 ${x.distRate.toFixed(1)}%)
+- 배부받은 본부 ${x.distDepts}곳 / 팀(부서) ${x.distTeams}곳 / 신청자 ${x.distPeople}명
+- 팀(부서)당 평균 ${fmtNum_(x.avgPerTeam)}개 (중앙값 ${fmtNum_(x.medianPerTeam)}개, 최대 ${fmtNum_(x.maxPerTeam)}개)
+- 신청 건당 평균 ${fmtNum_(x.avgPerRequest)}개
+
+■ 기간: ${x.firstDate} ~ ${x.lastDate} (신청 접수 기준)`;
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
+  return x;
 }
 
 // ── 신청 제출 (신청 즉시 재고 차감) ──────────────────────────
