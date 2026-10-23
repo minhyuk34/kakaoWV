@@ -456,6 +456,7 @@ tr:hover td{background:var(--card)}
       <button class="tab" onclick="adminTab('inventory',this)">재고 관리</button>
       <button class="tab" onclick="adminTab('history',this)">배부 이력</button>
       <button class="tab" onclick="adminTab('audit',this)">⚠️ 재고 진단</button>
+      <button class="tab" onclick="adminTab('accounts',this)">👤 계정 관리</button>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
       <span id="admin-last-update" style="font-size:12px;color:var(--muted)"></span>
@@ -469,6 +470,7 @@ tr:hover td{background:var(--card)}
   <div id="admin-inventory" style="display:none"></div>
   <div id="admin-history" style="display:none"></div>
   <div id="admin-audit" style="display:none"></div>
+  <div id="admin-accounts" style="display:none"></div>
 </div>
 
 <!-- 피드백 -->
@@ -1399,6 +1401,7 @@ function renderAdmin() {
   if (currentAdminTab==='requests') renderAdminRequests();
   else if (currentAdminTab==='inventory') renderAdminInventory();
   else if (currentAdminTab==='audit') renderAdminAudit();
+  else if (currentAdminTab==='accounts') { /* 계정 목록은 탭을 열 때만 불러온다(자동 새로고침이 검색창을 지우지 않도록) */ }
   else renderAdminHistory();
 }
 function adminTab(t, el) {
@@ -1409,9 +1412,11 @@ function adminTab(t, el) {
   document.getElementById('admin-inventory').style.display=t==='inventory'?'':'none';
   document.getElementById('admin-history').style.display=t==='history'?'':'none';
   document.getElementById('admin-audit').style.display=t==='audit'?'':'none';
+  document.getElementById('admin-accounts').style.display=t==='accounts'?'':'none';
   if (t==='requests') renderAdminRequests();
   else if (t==='inventory') renderAdminInventory();
   else if (t==='audit') renderAdminAudit();
+  else if (t==='accounts') loadAdminAccounts();
   else renderAdminHistory();
 }
 // 서버에서 혹시 ISO 타임스탬프가 섞여 와도 화면에는 항상 연/월/일까지만 표기
@@ -1835,6 +1840,66 @@ function computeStockAudit() {
 
   return { problemProducts, adminAddedRows, riskRows };
 }
+// ── 계정 관리(비밀번호 초기화) ──
+let adminAccounts = [];
+async function loadAdminAccounts() {
+  const el = document.getElementById('admin-accounts');
+  if (!document.getElementById('acct-search')) {
+    el.innerHTML = `
+      <div style="font-size:12px;color:var(--muted);line-height:1.7;margin:6px 0 12px">
+        비밀번호를 잊은 직원의 <b>가입 이메일로 재설정 링크(30분 유효)</b>를 보냅니다. 링크는 화면에 표시되지 않으며, 계정과 신청 내역은 그대로 유지됩니다.<br>
+        로그인 잠금(5회 실패)도 함께 풀립니다. 처리 내역은 접속로그에 남습니다.
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input id="acct-search" type="text" placeholder="이름으로 검색" oninput="renderAdminAccountRows()" style="flex:1;max-width:320px;padding:9px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none">
+      </div>
+      <div id="acct-rows"><div class="empty"><p>⏳ 불러오는 중...</p></div></div>`;
+  }
+  try {
+    const res = await api('getAccounts', {});
+    if (!res.ok) { document.getElementById('acct-rows').innerHTML = `<div class="empty"><p>❌ ${esc(res.error || '계정 목록을 불러오지 못했습니다.')}</p></div>`; return; }
+    adminAccounts = res.accounts || [];
+    renderAdminAccountRows();
+  } catch (e) {
+    document.getElementById('acct-rows').innerHTML = `<div class="empty"><p>❌ 서버 오류: ${esc(e.message)}</p></div>`;
+  }
+}
+function renderAdminAccountRows() {
+  const box = document.getElementById('acct-rows');
+  if (!box) return;
+  const q = (document.getElementById('acct-search')?.value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const list = adminAccounts.filter(a => !q || a.name.toLowerCase().includes(q));
+  if (list.length === 0) { box.innerHTML = `<div class="empty"><div class="emoji">🔍</div><p>${q ? '검색 결과가 없습니다' : '계정이 없습니다'}</p></div>`; return; }
+  box.innerHTML = `<table><thead><tr><th>이름</th><th>권한</th><th>등록 이메일</th><th>상태</th><th>가입일</th><th></th></tr></thead>
+    <tbody>${list.map(a => {
+      const idx = adminAccounts.indexOf(a);
+      const badges = [
+        a.role === 'admin' ? '<span style="background:#EDE7FF;color:#5B3FC4;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">관리자</span>' : '직원',
+      ];
+      const state = [a.pendingVerification ? '<span style="color:#B7791F;font-weight:700">이메일 인증 대기</span>' : '정상'];
+      if (a.locked) state.push('<span style="color:var(--red);font-weight:700">🔒 로그인 잠김</span>');
+      return `<tr>
+        <td><b>${esc(a.name)}</b></td><td>${badges[0]}</td><td>${esc(a.email)}</td><td>${state.join(' · ')}</td><td style="font-size:12px;color:var(--muted)">${esc(a.joinedAt)}</td>
+        <td style="text-align:right"><button onclick="resetAccountPassword(${idx})" style="padding:5px 12px;border:none;border-radius:6px;background:var(--kakao);color:var(--on-primary);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">🔑 비밀번호 초기화</button></td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+let _acctResetting = false;
+async function resetAccountPassword(idx) {
+  const a = adminAccounts[idx];
+  if (!a || _acctResetting) return;
+  if (a.email.indexOf('@') < 0) { alert(`"${a.name}" 계정에는 등록된 이메일이 없어 메일을 보낼 수 없습니다.\n구글 시트의 계정 시트 D열을 확인해주세요.`); return; }
+  if (!confirm(`"${a.name}" 님의 등록 이메일(${a.email})로 비밀번호 재설정 링크를 보낼까요?\n\n· 링크는 30분 동안만 유효합니다.\n· 계정과 신청 내역은 그대로 유지됩니다.\n· 로그인 잠금도 해제됩니다.`)) return;
+  _acctResetting = true;
+  try {
+    const res = await api('adminResetPassword', { targetName: a.name });
+    if (!res.ok) { toast('❌ ' + (res.error || '처리하지 못했습니다')); return; }
+    alert(`✅ ${res.name} 님의 등록 이메일(${res.to})로 재설정 링크를 보냈습니다.\n\n직원에게 메일(스팸함 포함)을 확인해 30분 안에 링크를 눌러 새 비밀번호를 설정하라고 안내해주세요.`);
+    loadAdminAccounts();
+  } catch (e) { toast('❌ 서버 오류: ' + e.message); }
+  finally { _acctResetting = false; }
+}
+
 function renderAdminAudit() {
   const el = document.getElementById('admin-audit');
   const { problemProducts, adminAddedRows, riskRows } = computeStockAudit();

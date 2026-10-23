@@ -751,6 +751,7 @@ function onOpen() {
     .addItem('🔐 서버 인증 강제 켜기', 'enableAuthEnforcement')
     .addItem('🔐 서버 인증 강제 끄기(비상용)', 'disableAuthEnforcement')
     .addItem('🔐 기존 결과보고 파일 공유 제한(도메인)', 'restrictExistingReportFiles')
+    .addItem('🔐 비밀번호 초기화(재설정 메일 발송)', 'adminResetPassword')
     .addItem('🔐 접속로그 점검(최근 7일)', 'reviewAccessLog')
     .addItem('🔐 시트 ID를 스크립트 속성으로 복사(1회)', 'migrateSheetIdToProperties')
     .addSeparator()
@@ -920,6 +921,8 @@ function doPost(e) {
     else if (action === 'uploadReport')      result = uploadReport(data);
     else if (action === 'submitFeedback')    result = submitFeedback(data);
     else if (action === 'getFeedback')       result = getFeedback();
+    else if (action === 'getAccounts')       result = getAccounts();
+    else if (action === 'adminResetPassword') result = adminResetPasswordAction(data);
     else result = { ok: false, error: '알 수 없는 action' };
 
     // 신청/재고 상태를 바꾸는 액션 이후에는 배부현황 시트를 자동 갱신
@@ -989,7 +992,7 @@ const ADMIN_ONLY_ACTIONS = [
   'updateRequest', 'updateRequestSchedule', 'saveDispatchMemo', 'updateStock', 'setProductBlocked',
   'syncStock', 'generateReport', 'approveItems', 'updateItemQty', 'returnDistributedQty',
   'editDistributedQty', 'addAdminItem', 'distributeItems', 'mergeRequests',
-  'confirmCancelItem', 'rejectCancelItem', 'getFeedback'
+  'confirmCancelItem', 'rejectCancelItem', 'getFeedback', 'getAccounts', 'adminResetPassword'
 ];
 // 본인 신청만 다룰 수 있는 동작 → 신청 ID가 들어 있는 필드 이름 (관리자는 예외)
 const OWNER_ACTION_ID_FIELD = {
@@ -1426,27 +1429,109 @@ function requestPasswordReset({ name, email }) {
     if (rows[i][0] !== name) continue;
     if (String(rows[i][3] || '').trim().toLowerCase() !== wantedEmail) continue;
 
-    const token = Utilities.getUuid();
-    const expiresAt = Date.now() + 30 * 60 * 1000; // 30분
-    s.getRange(i + 1, 6).setValue(token);
-    s.getRange(i + 1, 7).setValue(String(expiresAt));
-
-    const resetUrl = `${APP_URL}?resetToken=${encodeURIComponent(token)}`;
-    MailApp.sendEmail({
-      to: String(rows[i][3]).trim(),
-      subject: '[카카오프렌즈 GIK] 비밀번호 재설정 안내',
-      htmlBody: `
-        <div style="font-family:sans-serif; line-height:1.7">
-          <h2>🔑 비밀번호 재설정</h2>
-          <p>안녕하세요, ${escapeHtml_(name)}님.<br>아래 링크를 눌러 새 비밀번호를 설정해주세요. (30분 이내에만 유효합니다)</p>
-          <p><a href="${resetUrl}">${resetUrl}</a></p>
-          <p style="color:#888; font-size:12px; margin-top:20px">본인이 요청하지 않았다면 이 메일은 무시해주셔도 됩니다.</p>
-        </div>
-      `
-    });
+    sendResetMail_(s, i, name);
     break;
   }
   return GENERIC;
+}
+
+// 계정 시트의 i번째 행(0부터)에 재설정 토큰(30분 유효)을 기록하고, 그 계정의 등록 이메일로 링크를 보낸다.
+// 링크는 화면에 보여주지 않고 등록된 이메일로만 보낸다(관리자가 대신 로그인하는 데 쓰이지 않도록).
+function sendResetMail_(s, i, name) {
+  const email = String(s.getRange(i + 1, 4).getValue() || '').trim();
+  const token = Utilities.getUuid();
+  const expiresAt = Date.now() + 30 * 60 * 1000; // 30분
+  s.getRange(i + 1, 6).setValue(token);
+  s.getRange(i + 1, 7).setValue(String(expiresAt));
+  const resetUrl = `${APP_URL}?resetToken=${encodeURIComponent(token)}`;
+  MailApp.sendEmail({
+    to: email,
+    subject: '[카카오프렌즈 GIK] 비밀번호 재설정 안내',
+    htmlBody: `
+      <div style="font-family:sans-serif; line-height:1.7">
+        <h2>🔑 비밀번호 재설정</h2>
+        <p>안녕하세요, ${escapeHtml_(name)}님.<br>아래 링크를 눌러 새 비밀번호를 설정해주세요. (30분 이내에만 유효합니다)</p>
+        <p><a href="${resetUrl}">${resetUrl}</a></p>
+        <p style="color:#888; font-size:12px; margin-top:20px">본인이 요청하지 않았다면 이 메일은 무시해주셔도 됩니다.</p>
+      </div>
+    `
+  });
+}
+function maskEmail_(e) {
+  const m = String(e || '').match(/^([^@]{1,})@(.+)$/);
+  if (!m) return '(등록된 이메일 없음)';
+  return m[1].slice(0, Math.min(2, m[1].length)) + '***@' + m[2];
+}
+
+// ── 관리자: 비밀번호 초기화 (스프레드시트 메뉴) ────────────────────
+// 비밀번호를 잊은 직원의 "등록된 이메일"로 재설정 링크를 보낸다. 계정 행을 지우지 않으므로
+//  - 이름 선점(다른 사람이 같은 이름으로 먼저 가입) 위험이 없고, 권한(관리자 등)·신청 내역이 그대로 유지된다.
+//  - 로그인 잠금(5회 실패)도 함께 풀어준다. 이미 로그인된 세션은 직원이 새 비밀번호를 설정하는 순간 모두 폐기된다.
+// 사용: 메뉴 '🔐 비밀번호 초기화' → 직원 이름 입력. (메뉴 없이 편집기에서 adminResetPasswordFor_('이름')을 직접 실행해도 된다)
+function adminResetPasswordFor_(name, opts) {
+  opts = opts || {};
+  // 웹 관리자 화면에서 호출될 때는 doPost가 로그인한 관리자 이름으로 접속로그를 남기므로 여기서는 기록하지 않는다
+  const audit = (sess, d, res) => { if (!opts.skipAudit) auditLog_('adminResetPassword', sess, d, res); };
+  name = cleanText_(name);
+  if (!name) return { ok: false, error: '이름을 입력해주세요.' };
+  const s = sheet(SHEET_ACCT);
+  const rows = s.getDataRange().getValues();
+  let idx = -1;
+  for (let i = 1; i < rows.length; i++) { if (rows[i][0] === name) { idx = i; break; } }
+  let operator = '(알 수 없음)';
+  try { operator = Session.getActiveUser().getEmail() || operator; } catch (e) {}
+  const logSession = { name: 'sheet:' + operator, role: 'admin' };
+  if (idx < 0) {
+    audit(logSession, { name: name }, { ok: false, error: '계정 없음' });
+    return { ok: false, error: `"${name}" 계정을 찾을 수 없습니다. 이름(로그인 아이디)이 정확한지 확인해주세요.` };
+  }
+  const email = String(rows[idx][3] || '').trim();
+  if (!/^[^\s@<>"']+@worldvision\.or\.kr$/i.test(email)) {
+    audit(logSession, { name: name }, { ok: false, error: '등록 이메일 없음/형식 오류' });
+    return { ok: false, error: `"${name}" 계정에 등록된 이메일이 없거나 형식이 올바르지 않아 메일을 보낼 수 없습니다. 계정 시트의 D열(이메일)을 확인해주세요.` };
+  }
+  try {
+    sendResetMail_(s, idx, name);
+  } catch (e) {
+    audit(logSession, { name: name }, { ok: false, error: '메일 발송 실패: ' + e.message });
+    return { ok: false, error: '메일을 보내지 못했습니다: ' + e.message };
+  }
+  clearLoginFails_(name);
+  audit(logSession, { name: name }, { ok: true });
+  return { ok: true, name: name, to: maskEmail_(email), role: String(rows[idx][2] || '') };
+}
+// ── 관리자 화면용: 계정 목록 / 비밀번호 초기화 ───────────────────────
+// 목록에는 비밀번호 관련 값을 절대 싣지 않는다(이름·권한·가려진 이메일·인증상태·가입일·잠금 여부만).
+function getAccounts() {
+  const rows = sheet(SHEET_ACCT).getDataRange().getValues().slice(1);
+  const accounts = rows.filter(r => r[0]).map(r => ({
+    name: String(r[0]),
+    role: String(r[2] || 'team'),
+    email: maskEmail_(r[3]),
+    pendingVerification: String(r[7]) === 'N',
+    joinedAt: String(r[4] || ''),
+    locked: String(r[2]) !== 'admin' && isLoginLocked_(String(r[0]))
+  }));
+  return { ok: true, accounts: accounts };
+}
+function adminResetPasswordAction(data) {
+  const name = cleanText_(data.targetName);
+  if (!name) return { ok: false, error: '대상 직원을 선택해주세요.' };
+  // 같은 직원에게 메일이 연달아 나가지 않도록(버튼 중복 클릭 등) 1분에 한 번만 허용
+  if (rateLimited_('adminrst:' + name, 60)) return { ok: false, error: '방금 이미 재설정 메일을 보냈습니다. 1분 뒤에 다시 시도해주세요.' };
+  const r = adminResetPasswordFor_(name, { skipAudit: true });
+  if (!r.ok) return r;
+  return { ok: true, name: r.name, to: r.to };
+}
+
+function adminResetPassword() {
+  const ui = SpreadsheetApp.getUi();
+  const ans = ui.prompt('비밀번호 초기화', '비밀번호를 잊은 직원의 이름(로그인 아이디)을 입력하세요.\n그 직원이 가입 때 등록한 이메일로 재설정 링크(30분 유효)를 보냅니다.', ui.ButtonSet.OK_CANCEL);
+  if (ans.getSelectedButton() !== ui.Button.OK) return;
+  const r = adminResetPasswordFor_(ans.getResponseText());
+  ui.alert(r.ok
+    ? `✅ ${r.name} 님의 등록 이메일(${r.to})로 재설정 링크를 보냈습니다.\n\n직원에게 메일(스팸함 포함)을 확인해 30분 안에 링크를 눌러 새 비밀번호를 설정하라고 안내해주세요.\n로그인 잠금도 해제했습니다.`
+    : `❌ ${r.error}`);
 }
 
 // ── 비밀번호 재설정 실행(토큰 검증) ───────────────────────────
@@ -1591,7 +1676,7 @@ function auditLog_(action, session, data, result, kind) {
     const attempted = cleanText_(data.name || '').slice(0, 60);
     const user = session ? session.name : (attempted || '(미로그인)');
     const role = session ? session.role : ((result && result.role) || '');
-    const target = cleanText_(data.id || data.existingId || data.targetId || data.num || '').slice(0, 40);
+    const target = cleanText_(data.id || data.existingId || data.targetId || data.num || data.targetName || '').slice(0, 40);
     let outcome = '성공';
     if (kind === 'deny') outcome = '거부';
     else if (result && result.ok === false) outcome = result.pendingVerification ? '성공' : '실패';
