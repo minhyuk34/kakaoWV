@@ -731,6 +731,28 @@ const REPORT_TEMPLATE_B64 = [
 const REPORT_TEMPLATE_NAME = '후원물품(GIK) 결과보고 서식_2025.xlsx';
 
 // ── 스프레드시트에서 열었을 때 수동 갱신 메뉴 추가 ──────────────
+// 계정 시트를 구글 시트에서 직접 고친 경우(권한 지정·이메일 변경 등)를 접속로그에 남긴다.
+// 비밀번호·토큰 열의 값은 기록하지 않고 "수정됨"만 남기며, 권한 열만 바뀐 값을 기록한다.
+// (웹앱이 자체적으로 쓰는 변경은 onEdit를 일으키지 않아 중복되지 않는다. 행 삭제는 기록되지 않는다.)
+function onEdit(e) {
+  try {
+    if (!e || !e.range) return;
+    const sh = e.range.getSheet();
+    if (sh.getName() !== SHEET_ACCT || e.range.getRow() < 2) return;
+    const col = e.range.getColumn();
+    const labels = { 1: '이름', 2: '비밀번호', 3: '권한', 4: '이메일' };
+    let note = (labels[col] || ('열 ' + col)) + ' 수정';
+    if (col === 3) note += ': ' + cleanText_(e.oldValue) + ' → ' + cleanText_(e.value);
+    if (col === 4) note += ': ' + maskEmail_(e.oldValue) + ' → ' + maskEmail_(e.value);
+    const target = cleanText_(sh.getRange(e.range.getRow(), 1).getValue()).slice(0, 40);
+    const log = e.source.getSheetByName(SHEET_AUDIT);
+    if (!log) return;
+    let who = '(시트 직접 수정)';
+    try { if (e.user && e.user.getEmail()) who = 'sheet:' + e.user.getEmail(); } catch (x) {}
+    log.appendRow([new Date(), who, 'admin', '계정시트수정', target, '성공', note]);
+  } catch (err) {}
+}
+
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('배부현황')
@@ -753,6 +775,8 @@ function onOpen() {
     .addItem('🔐 기존 결과보고 파일 공유 제한(도메인)', 'restrictExistingReportFiles')
     .addItem('🔐 비밀번호 초기화(재설정 메일 발송)', 'adminResetPassword')
     .addItem('🔐 접속로그 점검(최근 7일)', 'reviewAccessLog')
+    .addItem('🔐 관리자 2차 인증(이메일) 켜기', 'enableAdmin2fa')
+    .addItem('🔐 관리자 2차 인증 끄기(비상용)', 'disableAdmin2fa')
     .addItem('🔐 시트 ID를 스크립트 속성으로 복사(1회)', 'migrateSheetIdToProperties')
     .addSeparator()
     .addItem('갇힌 신청건 상태 일괄 수정(일부취소+나머지배부완료)', 'fixStuckApprovedStatuses')
@@ -842,13 +866,8 @@ function initSheets() {
   if (s.getLastRow() === 0)
     s.appendRow(['이름', '비밀번호해시', '권한', '이메일', '가입일']);
 
-  // 관리자 계정 자동 생성
-  const rows = s.getDataRange().getValues();
-  const exists = rows.some(r => r[0] === '관리자');
-  if (!exists) {
-    const hash = sha256('kakao1234');
-    s.appendRow(['관리자', hash, 'admin', '', new Date().toLocaleString('ko-KR')]);
-  }
+  // 관리자 계정은 소스에 비밀번호를 두지 않기 위해 자동 생성하지 않는다.
+  // 첫 관리자는 화면에서 일반 가입(@worldvision.or.kr 이메일 인증) 후, '계정' 시트 C열을 'admin'으로 직접 바꿔 지정한다.
 
   // 신청 시트 (이메일 컬럼 추가)
   s = ss.getSheetByName(SHEET_REQ) || ss.insertSheet(SHEET_REQ);
@@ -922,6 +941,10 @@ function doPost(e) {
     else if (action === 'submitFeedback')    result = submitFeedback(data);
     else if (action === 'getFeedback')       result = getFeedback();
     else if (action === 'getAccounts')       result = getAccounts();
+    else if (action === 'changePassword')    result = changePassword(data, session);
+    else if (action === 'setAccountRole')    result = setAccountRole(data);
+    else if (action === 'setAccountDisabled') result = setAccountDisabled(data);
+    else if (action === 'logExport')         result = logExport(data);
     else if (action === 'adminResetPassword') result = adminResetPasswordAction(data);
     else result = { ok: false, error: '알 수 없는 action' };
 
@@ -957,14 +980,20 @@ function doPost(e) {
       catch (schedErr) { Logger.log('지연 갱신 예약 실패: ' + schedErr.message); }
     }
     // 활동 중인 사용자의 세션을 연장 (화면이 자동으로 백그라운드 갱신하는 요청 bg:true는 연장하지 않는다)
-    if (session && action !== 'logout' && PUBLIC_ACTIONS.indexOf(action) < 0 && !data.bg && result && typeof result === 'object') {
+    if (session && action !== 'logout' && PUBLIC_ACTIONS.indexOf(action) < 0 && !data.bg && result && typeof result === 'object' && !result.sessionToken) {
       const refreshed = maybeRefreshSession_(session);
       if (refreshed) result.sessionToken = refreshed;
     }
   } catch(err) {
-    result = { ok: false, error: err.message };
+    // 내부 오류 문구(시트·함수 이름 등)는 화면에 내보내지 않고 로그에만 남긴다
+    Logger.log('doPost 예외 [' + (data && data.action) + ']: ' + err.message);
+    const m = String(err && err.message || '');
+    result = { ok: false, code: 'SERVER_ERROR',
+      error: /lock|timed out|timeout|Lock/i.test(m) ? '요청이 많아 잠시 후 다시 시도해주세요.' : '처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요. 계속되면 관리자에게 문의해주세요.',
+      auditNote: m.slice(0, 100) };
   }
   auditLog_(data && data.action, session, data, result);
+  if (result && typeof result === 'object' && 'auditNote' in result) { result = Object.assign({}, result); delete result.auditNote; }
   return jsonOut_(result);
 }
 
@@ -986,13 +1015,52 @@ const AUTH_REFRESH_BELOW_SEC = 20 * 60;      // 남은 시간이 이보다 적�
 const LOGIN_MAX_FAILS        = 5;            // 연속 실패 허용 횟수
 const LOGIN_LOCK_SEC         = 15 * 60;      // 잠금 시간
 
+// ── 계정 정책 (개발보안 요구사항 확인서 반영) ───────────────────
+const PW_MAX_AGE_DAYS = 180;   // 비밀번호 최대 사용기간
+const PW_MIN_AGE_DAYS = 1;     // 비밀번호 최소 사용기간(사용자가 직접 변경할 때만 적용)
+const PW_HISTORY_N    = 3;     // 직전 N개 비밀번호는 재사용 금지
+const DORMANT_DAYS    = 90;    // 이 기간 이상 로그인하지 않으면 이메일 인증 후 재사용
+const DAY_MS = 24 * 3600 * 1000;
+const OTP_TTL_SEC = 600, OTP_MAX_TRIES = 5;
+// 계정 시트 열(0부터): 0 이름, 1 비밀번호, 2 권한, 3 이메일, 4 가입일, 5 재설정토큰, 6 재설정만료,
+//   7 인증상태('N' 가입 인증대기 / 'D' 장기 미접속 인증대기 / 'Y'·빈칸 정상), 8 인증토큰, 9 인증만료,
+//   10 비밀번호 변경시각(ms), 11 비밀번호 이력(JSON, 최근 N개), 12 마지막 로그인(ms), 13 사용중지('Y')
+const COL_PWAT = 10, COL_PWHIST = 11, COL_LASTLOGIN = 12, COL_DISABLED = 13;
+let _authFailReason = '';
+function validWvEmail_(e) { return /^[^\s@<>"']+@worldvision\.or\.kr$/i.test(String(e || '').trim()); }
+function parseHistory_(v) { try { const a = JSON.parse(String(v || '[]')); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+// 직전 N개(현재 포함) 비밀번호 중 하나와 같은지
+function isPasswordReused_(currentRec, history, clientHash) {
+  const all = [currentRec].concat(history).filter(Boolean);
+  const recs = all.filter((x, i) => all.indexOf(x) === i).slice(0, PW_HISTORY_N); // 현재 기록은 이력에도 있으므로 중복 제거
+  return recs.some(r => verifyPassword_(r, clientHash));
+}
+function nextHistory_(newRec, oldRec, oldHist) {
+  // 현재 기록(oldRec)은 이력에도 들어 있으므로 중복을 제거해야 "직전 N개"가 정확히 유지된다
+  const prev = [oldRec].concat(oldHist).filter(x => x && x !== newRec);
+  return [newRec].concat(prev.filter((x, i) => prev.indexOf(x) === i)).slice(0, PW_HISTORY_N);
+}
+// 비밀번호를 새 값으로 바꾸고 변경시각·이력을 갱신한다(재설정·직접 변경 공용). touchLogin이면 마지막 로그인도 지금으로(휴면 해제).
+function writePassword_(s, rowIdx, rowVals, clientHash, touchLogin) {
+  const rec = newPasswordRecord_(clientHash);
+  const hist = nextHistory_(rec, rowVals[1], parseHistory_(rowVals[COL_PWHIST]));
+  s.getRange(rowIdx + 1, 2).setValue(rec);
+  s.getRange(rowIdx + 1, COL_PWAT + 1).setValue(Date.now());
+  s.getRange(rowIdx + 1, COL_PWHIST + 1).setValue(JSON.stringify(hist));
+  if (touchLogin) s.getRange(rowIdx + 1, COL_LASTLOGIN + 1).setValue(Date.now());
+}
+function claimSession_(name, jti) {
+  try { CacheService.getScriptCache().put('cs_' + sha256Hex_(name).slice(0, 32), jti, 21600); } catch (e) {}
+}
+
 const PUBLIC_ACTIONS = ['register', 'login', 'findAccountByEmail', 'requestPasswordReset', 'resetPasswordWithToken', 'verifyEmail', 'resendVerification'];
 // 관리자만 실행할 수 있는 동작 (그 외 로그인 사용자 전용: getStock, getRequests, submitRequest, submitFeedback, logout)
 const ADMIN_ONLY_ACTIONS = [
   'updateRequest', 'updateRequestSchedule', 'saveDispatchMemo', 'updateStock', 'setProductBlocked',
   'syncStock', 'generateReport', 'approveItems', 'updateItemQty', 'returnDistributedQty',
   'editDistributedQty', 'addAdminItem', 'distributeItems', 'mergeRequests',
-  'confirmCancelItem', 'rejectCancelItem', 'getFeedback', 'getAccounts', 'adminResetPassword'
+  'confirmCancelItem', 'rejectCancelItem', 'getFeedback', 'getAccounts', 'adminResetPassword',
+  'setAccountRole', 'setAccountDisabled'
 ];
 // 본인 신청만 다룰 수 있는 동작 → 신청 ID가 들어 있는 필드 이름 (관리자는 예외)
 const OWNER_ACTION_ID_FIELD = {
@@ -1099,6 +1167,7 @@ function issueSession_(user, prev) {
   return body + '.' + signBody_(body);
 }
 function verifySession_(token) {
+  _authFailReason = '';
   if (!token || typeof token !== 'string') return null;
   const parts = token.split('.');
   if (parts.length !== 2) return null;
@@ -1112,7 +1181,11 @@ function verifySession_(token) {
     const cache = CacheService.getScriptCache();
     if (cache.get('rvj_' + p.j)) return null;                                   // 로그아웃된 토큰
     const rv = cache.get('rvu_' + sha256Hex_(p.n).slice(0, 32));                // 비밀번호 변경 이전에 발급된 토큰
-    if (rv && p.i0 <= Number(rv)) return null;
+    // 같은 초에 새로 발급된 세션(방금 로그인한 본인)을 잘못 폐기하지 않도록 '<' 로 비교한다
+    if (rv && p.i0 < Number(rv)) return null;
+    // 같은 계정으로 다른 곳에서 새로 로그인하면 이전 로그인은 무효(동시 로그인 금지)
+    const cur = cache.get('cs_' + sha256Hex_(p.n).slice(0, 32));
+    if (cur && cur !== p.j) { _authFailReason = 'SUPERSEDED'; return null; }
   } catch (e) {}
   return { name: p.n, role: p.r, email: p.e || '', jti: p.j, i0: p.i0, x: p.x };
 }
@@ -1142,6 +1215,9 @@ function checkAccess_(action, data) {
 
   if (!sess) {
     if (isAuthEnforced_()) {
+      if (_authFailReason === 'SUPERSEDED') {
+        return { ok: false, result: { ok: false, code: 'AUTH_REQUIRED', reason: 'SUPERSEDED', error: '같은 계정으로 다른 곳에서 로그인하여 이 화면은 로그아웃되었습니다. 다시 로그인해주세요.' } };
+      }
       return { ok: false, result: { ok: false, code: 'AUTH_REQUIRED', error: '로그인이 필요하거나 로그인이 만료되었습니다. 다시 로그인해주세요.' } };
     }
     return { ok: true, session: null }; // 전환 기간: 토큰 없는 기존 화면은 예전처럼 동작
@@ -1258,17 +1334,17 @@ function rateLimited_(key, sec) {
 //               8 인증토큰, 9 인증만료
 // @worldvision.or.kr 형식만 맞으면 아무 주소로나 가입할 수 있으므로, 그 주소로 보낸 메일의 링크를 눌러야 로그인할 수 있다.
 const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
-function sendVerificationMail_(email, name, token) {
+function sendVerificationMail_(email, name, token, dormant) {
   const url = `${APP_URL}?verifyToken=${encodeURIComponent(token)}`;
   MailApp.sendEmail({
     to: email,
-    subject: '[카카오프렌즈 GIK] 가입 이메일 인증 안내',
+    subject: dormant ? '[카카오프렌즈 GIK] 계정 사용 재개 인증 안내' : '[카카오프렌즈 GIK] 가입 이메일 인증 안내',
     htmlBody: `
       <div style="font-family:sans-serif; line-height:1.7">
         <h2>✉️ 이메일 인증</h2>
-        <p>안녕하세요, ${escapeHtml_(name)}님.<br>아래 링크를 누르면 가입이 완료됩니다. (24시간 이내에만 유효합니다)</p>
+        <p>안녕하세요, ${escapeHtml_(name)}님.<br>${dormant ? `${DORMANT_DAYS}일 이상 접속하지 않아 계정 사용이 일시 중지되었습니다. 아래 링크를 누르면 다시 사용할 수 있습니다.` : '아래 링크를 누르면 가입이 완료됩니다.'} (24시간 이내에만 유효합니다)</p>
         <p><a href="${url}">${url}</a></p>
-        <p style="color:#888; font-size:12px; margin-top:20px">본인이 가입한 적이 없다면 이 메일은 무시해주셔도 됩니다.</p>
+        <p style="color:#888; font-size:12px; margin-top:20px">${dormant ? '본인이 시도한 로그인이 아니라면 이 메일은 무시해주셔도 됩니다.' : '본인이 가입한 적이 없다면 이 메일은 무시해주셔도 됩니다.'}</p>
       </div>`
   });
 }
@@ -1298,7 +1374,8 @@ function register(data) {
     const rows = s.getDataRange().getValues();
     let existing = -1;
     for (let i = 1; i < rows.length; i++) { if (rows[i][0] === name) { existing = i; break; } }
-    const record = [name, newPasswordRecord_(clientHash), 'team', email, new Date().toLocaleString('ko-KR'), '', '', 'N', token, expiresAt];
+    const pwRec = newPasswordRecord_(clientHash);
+    const record = [name, pwRec, 'team', email, new Date().toLocaleString('ko-KR'), '', '', 'N', token, expiresAt, Date.now(), JSON.stringify([pwRec])];
     if (existing >= 0) {
       // 아직 이메일 인증을 못 끝낸 같은 이름은 새로 가입하는 사람의 정보로 덮어쓴다(이름 선점으로 본인이 못 가입하는 것을 막음)
       if (String(rows[existing][7]) !== 'N') return { ok: false, error: `"${name}" 이름으로 이미 가입된 계정이 있습니다.` };
@@ -1322,13 +1399,15 @@ function verifyEmail({ token }) {
   const s = sheet(SHEET_ACCT);
   const rows = s.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][7]) !== 'N' || String(rows[i][8] || '') !== String(token)) continue;
+    const st = String(rows[i][7]);
+    if ((st !== 'N' && st !== 'D') || String(rows[i][8] || '') !== String(token)) continue;
     if (!rows[i][9] || Date.now() > Number(rows[i][9])) {
       return { ok: false, error: '인증 링크가 만료되었습니다. 로그인 화면에서 "인증 메일 다시 받기"를 눌러주세요.' };
     }
     s.getRange(i + 1, 8).setValue('Y');
     s.getRange(i + 1, 9).setValue('');
     s.getRange(i + 1, 10).setValue('');
+    if (st === 'D') s.getRange(i + 1, COL_LASTLOGIN + 1).setValue(Date.now()); // 사용 재개
     return { ok: true, name: rows[i][0] };
   }
   return { ok: false, error: '유효하지 않거나 이미 사용된 인증 링크입니다. 이미 인증하셨다면 로그인해주세요.' };
@@ -1343,11 +1422,12 @@ function resendVerification({ name }) {
   const s = sheet(SHEET_ACCT);
   const rows = s.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0] !== nm || String(rows[i][7]) !== 'N') continue;
+    const st = String(rows[i][7]);
+    if (rows[i][0] !== nm || (st !== 'N' && st !== 'D')) continue;
     const token = Utilities.getUuid();
     s.getRange(i + 1, 9).setValue(token);
     s.getRange(i + 1, 10).setValue(String(Date.now() + VERIFY_TTL_MS));
-    try { sendVerificationMail_(String(rows[i][3]).trim(), nm, token); } catch (e) { Logger.log('인증 메일 재발송 실패: ' + e.message); }
+    try { sendVerificationMail_(String(rows[i][3]).trim(), nm, token, st === 'D'); } catch (e) { Logger.log('인증 메일 재발송 실패: ' + e.message); }
     break;
   }
   return GENERIC;
@@ -1379,14 +1459,213 @@ function login(data) {
     return { ok: false, error: '이름 또는 비밀번호가 올바르지 않습니다.' };
   }
   clearLoginFails_(name);
-  if (String(rows[idx][7]) === 'N') {
+  const row = rows[idx];
+  const state = String(row[7]);
+  if (state === 'N') {
     return { ok: false, code: 'UNVERIFIED', error: '이메일 인증이 아직 완료되지 않았습니다. 가입할 때 받은 인증 메일의 링크를 눌러주세요.' };
   }
-  if (String(rows[idx][1]).indexOf('v2$') !== 0) {
+  if (state === 'D') {
+    if (!rateLimited_('dorm:' + name, 60) && mailBudgetOk_()) {
+      const tk = Utilities.getUuid();
+      s.getRange(idx + 1, 9).setValue(tk); s.getRange(idx + 1, 10).setValue(String(Date.now() + VERIFY_TTL_MS));
+      try { sendVerificationMail_(String(row[3]).trim(), name, tk, true); } catch (e) { Logger.log('휴면 해제 메일 실패: ' + e.message); }
+    }
+    return { ok: false, code: 'DORMANT', error: `${DORMANT_DAYS}일 이상 접속하지 않아 계정 사용이 일시 중지되었습니다. 가입 이메일로 보낸 인증 링크를 누르면 다시 사용할 수 있습니다.` };
+  }
+  if (String(row[COL_DISABLED]) === 'Y') {
+    return { ok: false, code: 'DISABLED', error: '사용이 중지된 계정입니다. 관리자에게 문의해주세요.' };
+  }
+  if (String(row[1]).indexOf('v2$') !== 0) {
     s.getRange(idx + 1, 2).setValue(newPasswordRecord_(clientHash)); // 예전 형식 → 솔트+후추 형식으로 자동 전환
   }
-  const user = { name: rows[idx][0], role: rows[idx][2], email: rows[idx][3] || '' };
-  return { ok: true, name: user.name, role: user.role, email: user.email, sessionToken: issueSession_(user) };
+
+  const now = Date.now();
+  const emailOk = validWvEmail_(row[3]);
+  const pwAt = Number(row[COL_PWAT]) || 0;
+  const lastAt = Number(row[COL_LASTLOGIN]) || 0;
+  // 기한 검사는 이메일로 복구할 수 있는 계정에만 적용(복구 수단이 없는 계정이 영구 차단되는 것을 막음).
+  // 기록이 아직 없는 기존 계정은 이번 로그인을 기준일로 삼아 일괄 차단되지 않게 한다.
+  if (emailOk && lastAt && now - lastAt > DORMANT_DAYS * DAY_MS) {
+    const tk = Utilities.getUuid();
+    s.getRange(idx + 1, 8).setValue('D');
+    s.getRange(idx + 1, 9).setValue(tk); s.getRange(idx + 1, 10).setValue(String(now + VERIFY_TTL_MS));
+    if (!rateLimited_('dorm:' + name, 60) && mailBudgetOk_()) {
+      try { sendVerificationMail_(String(row[3]).trim(), name, tk, true); } catch (e) { Logger.log('휴면 해제 메일 실패: ' + e.message); }
+    }
+    return { ok: false, code: 'DORMANT', error: `${DORMANT_DAYS}일 이상 접속하지 않아 계정 사용이 일시 중지되었습니다. 가입 이메일로 인증 링크를 보냈습니다. 링크를 누르면 다시 사용할 수 있습니다.` };
+  }
+  if (emailOk && pwAt && now - pwAt > PW_MAX_AGE_DAYS * DAY_MS) {
+    let mailed = false;
+    if (!rateLimited_('exp:' + name, 60) && mailBudgetOk_()) {
+      try { sendResetMail_(s, idx, name); mailed = true; } catch (e) { Logger.log('만료 재설정 메일 실패: ' + e.message); }
+    }
+    return { ok: false, code: 'PW_EXPIRED', error: `비밀번호 사용기간(${PW_MAX_AGE_DAYS}일)이 지났습니다. ` + (mailed ? '가입 이메일로 재설정 링크를 보냈습니다. 링크로 새 비밀번호를 설정해주세요.' : '로그인 화면의 "아이디/비밀번호 찾기"에서 비밀번호를 재설정해주세요.') };
+  }
+  // 관리자 계정 2차 인증(이메일 인증번호) — 메뉴에서 켠 경우에만, 복구 가능한 이메일이 있는 관리자에게 적용
+  if (String(row[2]) === 'admin' && is2faOn_() && emailOk) {
+    const step = adminOtpStep_(name, row[3], data.otp);
+    if (step) return step;
+  }
+
+  if (!pwAt) {
+    s.getRange(idx + 1, COL_PWAT + 1).setValue(now);
+    s.getRange(idx + 1, COL_PWHIST + 1).setValue(JSON.stringify([String(row[1]).indexOf('v2$') === 0 ? row[1] : s.getRange(idx + 1, 2).getValue()]));
+  }
+  s.getRange(idx + 1, COL_LASTLOGIN + 1).setValue(now);
+  const user = { name: row[0], role: row[2], email: row[3] || '' };
+  const jti = Utilities.getUuid();
+  claimSession_(name, jti);
+  return { ok: true, name: user.name, role: user.role, email: user.email,
+           sessionToken: issueSession_(user, { i0: nowSec_(), j: jti }), previousLoginAt: lastAt || null };
+}
+
+// ── 관리자 2차 인증 (이메일 인증번호) ─────────────────────────────
+function is2faOn_() { try { return PropertiesService.getScriptProperties().getProperty('ADMIN_2FA') === 'true'; } catch (e) { return false; } }
+function enableAdmin2fa() {
+  PropertiesService.getScriptProperties().setProperty('ADMIN_2FA', 'true');
+  const m = '관리자 2차 인증을 켰습니다.\n관리자 계정은 로그인할 때 비밀번호 외에 가입 이메일로 받은 6자리 인증번호를 입력해야 합니다.\n(등록 이메일이 없거나 형식이 올바르지 않은 관리자 계정에는 적용되지 않습니다)';
+  Logger.log(m); try { SpreadsheetApp.getUi().alert(m); } catch (e) {}
+}
+function disableAdmin2fa() {
+  PropertiesService.getScriptProperties().setProperty('ADMIN_2FA', 'false');
+  const m = '관리자 2차 인증을 껐습니다. (비상용)';
+  Logger.log(m); try { SpreadsheetApp.getUi().alert(m); } catch (e) {}
+}
+// 비밀번호까지 맞은 관리자에게 호출된다. 통과하면 null, 아니면 로그인 응답(인증번호 요청/오류)을 돌려준다.
+function adminOtpStep_(name, email, otp) {
+  const cache = CacheService.getScriptCache();
+  const key = 'otp_' + sha256Hex_(name).slice(0, 32);
+  const hold = cache.get(key);
+  otp = String(otp === undefined || otp === null ? '' : otp).trim();
+  const hashOf = c => sha256Hex_(c + '|' + name + '|' + getOrCreateSecret_('AUTH_SECRET'));
+  if (otp) {
+    if (!hold) return { ok: false, code: 'OTP_EXPIRED', error: '인증번호가 만료되었습니다. 비밀번호를 다시 입력해 새 인증번호를 받아주세요.' };
+    const st = JSON.parse(hold);
+    if (st.n >= OTP_MAX_TRIES) { cache.remove(key); return { ok: false, code: 'OTP_EXPIRED', error: '인증번호를 여러 번 잘못 입력했습니다. 비밀번호를 다시 입력해 새 인증번호를 받아주세요.' }; }
+    if (safeEqual_(hashOf(otp), st.h)) { cache.remove(key); return null; }
+    st.n++;
+    cache.put(key, JSON.stringify(st), OTP_TTL_SEC);
+    return { ok: false, code: 'OTP_REQUIRED', error: `인증번호가 올바르지 않습니다. (남은 시도 ${Math.max(0, OTP_MAX_TRIES - st.n)}회)` };
+  }
+  if (rateLimited_('otpsend:' + name, 30)) {
+    return { ok: false, code: 'OTP_REQUIRED', to: maskEmail_(email), error: `인증번호를 이미 보냈습니다. 메일(${maskEmail_(email)})을 확인해주세요.` };
+  }
+  const code = ('000000' + (parseInt(Utilities.getUuid().replace(/-/g, '').slice(0, 10), 16) % 1000000)).slice(-6);
+  try {
+    MailApp.sendEmail({
+      to: String(email).trim(),
+      subject: '[카카오프렌즈 GIK] 관리자 로그인 인증번호',
+      htmlBody: `<div style="font-family:sans-serif; line-height:1.7">
+        <h2>🔐 관리자 로그인 인증번호</h2>
+        <p>안녕하세요, ${escapeHtml_(name)}님.<br>로그인 화면에 아래 인증번호를 입력해주세요. (10분 이내에만 유효합니다)</p>
+        <p style="font-size:28px; font-weight:800; letter-spacing:6px">${code}</p>
+        <p style="color:#888; font-size:12px; margin-top:20px">본인이 로그인하지 않았다면 이 메일은 무시하고, 비밀번호를 바꿔주세요.</p></div>`
+    });
+  } catch (e) {
+    Logger.log('관리자 인증번호 메일 실패: ' + e.message);
+    return { ok: false, error: '인증번호 메일을 보내지 못했습니다. 잠시 후 다시 시도해주세요.' };
+  }
+  cache.put(key, JSON.stringify({ h: hashOf(code), n: 0 }), OTP_TTL_SEC);
+  return { ok: false, code: 'OTP_REQUIRED', to: maskEmail_(email), error: `가입 이메일(${maskEmail_(email)})로 인증번호 6자리를 보냈습니다. 10분 이내에 입력해주세요.` };
+}
+
+// ── 로그인한 사용자의 비밀번호 변경 ────────────────────────────
+// 현재 비밀번호 확인 → 규칙 검사 → 직전 3개 재사용 금지 → 최소 사용기간(1일) 확인 후 변경한다.
+// 변경하면 다른 기기의 로그인은 모두 끊기고, 지금 화면에는 새 세션 토큰이 발급된다.
+function changePassword(data, sess) {
+  if (!sess) return { ok: false, code: 'AUTH_REQUIRED', error: '로그인이 필요합니다.' };
+  const cur = String(data.currentPassword || ''), nw = String(data.newPassword || '');
+  if (!cur || !nw) return { ok: false, error: '현재 비밀번호와 새 비밀번호를 입력해주세요.' };
+  const perr = validatePasswordPolicy_(nw, sess.name);
+  if (perr) return { ok: false, error: perr };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = sheet(SHEET_ACCT);
+    const rows = s.getDataRange().getValues();
+    let idx = -1;
+    for (let i = 1; i < rows.length; i++) { if (rows[i][0] === sess.name) { idx = i; break; } }
+    if (idx < 0) return { ok: false, error: '계정을 찾을 수 없습니다.' };
+    const isAdminAcct = String(rows[idx][2]) === 'admin';
+    if (!isAdminAcct && isLoginLocked_(sess.name)) return { ok: false, error: '실패가 반복되어 잠시 잠겼습니다. 15분 뒤에 다시 시도해주세요.' };
+    if (!verifyPassword_(rows[idx][1], sha256Hex_(cur))) {
+      if (isAdminAcct) Utilities.sleep(1000); else recordLoginFail_(sess.name);
+      return { ok: false, error: '현재 비밀번호가 올바르지 않습니다.' };
+    }
+    const newHash = sha256Hex_(nw);
+    if (isPasswordReused_(rows[idx][1], parseHistory_(rows[idx][COL_PWHIST]), newHash)) {
+      return { ok: false, error: `최근에 사용한 비밀번호 ${PW_HISTORY_N}개는 다시 사용할 수 없습니다. 다른 비밀번호를 입력해주세요.` };
+    }
+    const pwAt = Number(rows[idx][COL_PWAT]) || 0;
+    if (pwAt && Date.now() - pwAt < PW_MIN_AGE_DAYS * DAY_MS) {
+      return { ok: false, error: `비밀번호는 변경한 지 ${PW_MIN_AGE_DAYS}일이 지난 뒤에 다시 바꿀 수 있습니다. (분실한 경우에는 "아이디/비밀번호 찾기"를 이용해주세요.)` };
+    }
+    writePassword_(s, idx, rows[idx], newHash, false);
+    clearLoginFails_(sess.name);
+    revokeSession_(sess);                                 // 지금까지 쓰던 토큰은 폐기
+    revokeUserSessions_(sess.name);                       // 다른 기기의 로그인도 모두 폐기
+    const jti = Utilities.getUuid();
+    claimSession_(sess.name, jti);
+    const token = issueSession_({ name: rows[idx][0], role: rows[idx][2], email: rows[idx][3] || '' }, { i0: nowSec_(), j: jti });
+    return { ok: true, sessionToken: token };
+  } finally { lock.releaseLock(); }
+}
+
+// ── 관리자: 권한 변경 / 사용 중지·재개 (계정 관리 화면) ────────────────
+function findAccountRow_(rows, name) {
+  for (let i = 1; i < rows.length; i++) { if (rows[i][0] === name) return i; }
+  return -1;
+}
+function activeAdminCount_(rows) {
+  return rows.slice(1).filter(r => r[0] && String(r[2]) === 'admin' && String(r[COL_DISABLED]) !== 'Y').length;
+}
+function setAccountRole({ targetName, role, adminName }) {
+  const name = cleanText_(targetName);
+  if (['admin', 'team'].indexOf(role) < 0) return { ok: false, error: '올바르지 않은 권한 값입니다.' };
+  if (!name) return { ok: false, error: '대상 직원을 선택해주세요.' };
+  if (normNameServer_(name) === normNameServer_(adminName)) return { ok: false, error: '본인의 권한은 직접 바꿀 수 없습니다. 다른 관리자에게 요청해주세요.' };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = sheet(SHEET_ACCT);
+    const rows = s.getDataRange().getValues();
+    const idx = findAccountRow_(rows, name);
+    if (idx < 0) return { ok: false, error: `"${name}" 계정을 찾을 수 없습니다.` };
+    const before = String(rows[idx][2] || 'team');
+    if (before === role) return { ok: false, error: '이미 같은 권한입니다.' };
+    if (before === 'admin' && role !== 'admin' && activeAdminCount_(rows) <= 1) return { ok: false, error: '마지막 관리자의 권한은 바꿀 수 없습니다.' };
+    s.getRange(idx + 1, 3).setValue(role);
+    revokeUserSessions_(name);   // 새 권한이 곧바로 적용되도록 기존 로그인은 폐기
+    return { ok: true, name: name, role: role, auditNote: `권한 ${before} → ${role}` };
+  } finally { lock.releaseLock(); }
+}
+function setAccountDisabled({ targetName, disabled, reason, adminName }) {
+  const name = cleanText_(targetName);
+  const why = cleanText_(reason).slice(0, 60);
+  if (!name) return { ok: false, error: '대상 직원을 선택해주세요.' };
+  if (disabled && !why) return { ok: false, error: '사용 중지 사유를 입력해주세요. (예: 퇴사, 부서 이동)' };
+  if (normNameServer_(name) === normNameServer_(adminName)) return { ok: false, error: '본인 계정은 직접 중지할 수 없습니다.' };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = sheet(SHEET_ACCT);
+    const rows = s.getDataRange().getValues();
+    const idx = findAccountRow_(rows, name);
+    if (idx < 0) return { ok: false, error: `"${name}" 계정을 찾을 수 없습니다.` };
+    const isDisabled = String(rows[idx][COL_DISABLED]) === 'Y';
+    if (!!disabled === isDisabled) return { ok: false, error: disabled ? '이미 사용이 중지된 계정입니다.' : '이미 사용 중인 계정입니다.' };
+    if (disabled && String(rows[idx][2]) === 'admin' && activeAdminCount_(rows) <= 1) return { ok: false, error: '마지막 관리자 계정은 중지할 수 없습니다.' };
+    s.getRange(idx + 1, COL_DISABLED + 1).setValue(disabled ? 'Y' : '');
+    if (disabled) revokeUserSessions_(name);
+    return { ok: true, name: name, disabled: !!disabled, auditNote: disabled ? `사용 중지: ${why}` : '사용 재개' };
+  } finally { lock.releaseLock(); }
+}
+
+// 화면이 알려주는 출력·내려받기(피킹리스트, CSV 등) 기록 — 개인정보가 포함된 파일이 만들어진 사실을 남긴다
+function logExport(data) {
+  const kind = cleanText_(data.kind).slice(0, 30);
+  if (!kind) return { ok: false, error: '구분이 없습니다.' };
+  return { ok: true, auditNote: `${kind} ${Math.max(0, Math.min(100000, Number(data.count) || 0))}건` };
 }
 
 // ── 아이디(이름) 찾기 ────────────────────────────────────────
@@ -1509,6 +1788,9 @@ function getAccounts() {
     role: String(r[2] || 'team'),
     email: maskEmail_(r[3]),
     pendingVerification: String(r[7]) === 'N',
+    dormant: String(r[7]) === 'D',
+    disabled: String(r[COL_DISABLED]) === 'Y',
+    lastLoginAt: Number(r[COL_LASTLOGIN]) || 0,
     joinedAt: String(r[4] || ''),
     locked: String(r[2]) !== 'admin' && isLoginLocked_(String(r[0]))
   }));
@@ -1555,10 +1837,13 @@ function resetPasswordWithToken(data) {
       const perr = validatePasswordPolicy_(data.password, rows[i][0]);
       if (perr) return { ok: false, error: perr };
     }
-    s.getRange(i + 1, 2).setValue(newPasswordRecord_(clientHash));
+    if (isPasswordReused_(rows[i][1], parseHistory_(rows[i][COL_PWHIST]), clientHash)) {
+      return { ok: false, error: `최근에 사용한 비밀번호 ${PW_HISTORY_N}개는 다시 사용할 수 없습니다. 다른 비밀번호를 입력해주세요.` };
+    }
+    writePassword_(s, i, rows[i], clientHash, true);
     s.getRange(i + 1, 6).setValue('');   // 토큰 소진(재사용 방지)
     s.getRange(i + 1, 7).setValue('');
-    if (String(rows[i][7]) === 'N') {    // 등록한 이메일로 받은 링크로 재설정했으므로 이메일 소유가 확인됨
+    if (String(rows[i][7]) === 'N' || String(rows[i][7]) === 'D') {    // 등록한 이메일로 받은 링크로 재설정했으므로 이메일 소유가 확인됨
       s.getRange(i + 1, 8).setValue('Y');
       s.getRange(i + 1, 9).setValue('');
       s.getRange(i + 1, 10).setValue('');
@@ -1671,16 +1956,25 @@ function ensureAuditSheet_() {
 // kind: 'deny'(권한 거부) | 생략(처리 결과 기준)
 function auditLog_(action, session, data, result, kind) {
   try {
-    if (AUDIT_SKIP_ACTIONS.indexOf(action) >= 0) return;
+    let viewNote = '';
+    if (AUDIT_SKIP_ACTIONS.indexOf(action) >= 0) {
+      // 관리자가 전체 신청(개인정보 포함)을 조회한 것은 남긴다 — 자동 새로고침(bg)은 제외하고 10분에 한 번만 기록
+      const adminView = action === 'getRequests' && session && session.role === 'admin' && !(data && data.bg) && result && result.ok;
+      const serverError = result && result.code === 'SERVER_ERROR';   // 조회 동작이라도 서버 오류는 원인을 남긴다
+      if (!serverError) {
+        if (!adminView || rateLimited_('view:' + session.name, 600)) return;
+        viewNote = `관리자 전체 신청 조회 ${(result.requests || []).length}건(10분 단위 기록)`;
+      }
+    }
     data = data || {};
     const attempted = cleanText_(data.name || '').slice(0, 60);
     const user = session ? session.name : (attempted || '(미로그인)');
     const role = session ? session.role : ((result && result.role) || '');
-    const target = cleanText_(data.id || data.existingId || data.targetId || data.num || data.targetName || '').slice(0, 40);
+    const target = cleanText_(data.id || data.existingId || data.targetId || data.num || data.targetName || data.kind || '').slice(0, 40);
     let outcome = '성공';
     if (kind === 'deny') outcome = '거부';
-    else if (result && result.ok === false) outcome = result.pendingVerification ? '성공' : '실패';
-    const note = cleanText_((result && (result.code || '')) + ' ' + ((result && result.error) || '')).slice(0, 120);
+    else if (result && result.ok === false) outcome = (result.pendingVerification || result.code === 'OTP_REQUIRED') ? '성공' : '실패';
+    const note = cleanText_(viewNote || (result && result.auditNote) || ((result && (result.code || '')) + ' ' + ((result && result.error) || ''))).slice(0, 120);
     // 로그인하지 않은 상태의 반복 실패·거부가 로그를 가득 채우지 않도록 같은 대상은 10초에 한 번만 기록한다
     if (!session && outcome !== '성공' && rateLimited_('audit:' + action + ':' + user, 10)) return;
     ensureAuditSheet_().appendRow([new Date(), user, role, action, target, outcome, note]);

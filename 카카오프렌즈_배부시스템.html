@@ -213,6 +213,7 @@ tr:hover td{background:var(--card)}
   <button onclick="toggleCart()" id="btn-cart">📋 장바구니 <span class="badge" id="cart-badge" style="display:none">0</span></button>
   <button onclick="showPage('feedback')" id="btn-feedback">💬 피드백</button>
   <button onclick="openManual()" title="사용설명서 보기" style="font-size:13px">📖 사용설명서</button>
+  <button onclick="showChangePassword()" style="font-size:12px" title="비밀번호 변경">🔑 비밀번호 변경</button>
   <button onclick="doLogout()" style="font-size:12px">로그아웃</button>
 </nav>
 
@@ -281,6 +282,10 @@ tr:hover td{background:var(--card)}
       <div style="margin-bottom:20px">
         <label style="font-size:12px;font-weight:700;color:var(--muted)">비밀번호</label>
         <input id="login-pw" type="password" placeholder="비밀번호 입력" style="width:100%;margin-top:5px;padding:11px 14px;border:2px solid var(--border);border-radius:10px;font-size:15px;outline:none" onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <div id="login-otp-row" style="margin-bottom:20px;display:none">
+        <label style="font-size:12px;font-weight:700;color:var(--muted)">인증번호 (관리자 2차 인증)</label>
+        <input id="login-otp" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="이메일로 받은 6자리" style="width:100%;margin-top:5px;padding:11px 14px;border:2px solid var(--border);border-radius:10px;font-size:18px;letter-spacing:4px;outline:none" onfocus="this.style.borderColor='var(--kakao)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter')doLogin()">
       </div>
       <button onclick="doLogin()" id="btn-do-login" style="width:100%;background:var(--kakao);color:var(--on-primary);border:none;border-radius:999px;padding:14px;font-size:16px;font-weight:800;cursor:pointer">로그인</button>
       <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:14px">처음 오셨나요? <a href="#" onclick="switchTab('register');return false" style="color:var(--kakao);font-weight:700">회원가입</a></p>
@@ -833,25 +838,40 @@ async function doRegister() {
 async function doLogin() {
   const name=document.getElementById('login-name').value.trim();
   const pw=document.getElementById('login-pw').value;
+  const otpRow=document.getElementById('login-otp-row');
+  const otp=(otpRow.style.display!=='none' ? document.getElementById('login-otp').value.trim() : '');
   if (!name) { showErr('이름을 입력해주세요.'); return; }
   if (!pw)   { showErr('비밀번호를 입력해주세요.'); return; }
+  if (otpRow.style.display!=='none' && !otp) { showErr('이메일로 받은 인증번호 6자리를 입력해주세요.'); return; }
+  document.getElementById('login-resend').style.display = 'none';
   setLoading('btn-do-login', true, '로그인 중...');
   api.onRetry = (n, total) => setLoading('btn-do-login', true, `서버가 바빠 다시 시도 중… (${n}/${total})`);
   try {
-    const res = await api('login', {name, password: pw});
+    const body = {name, password: pw};
+    if (otp) body.otp = otp;
+    const res = await api('login', body);
     if (!res.ok) {
-      showErr(res.error);
-      if (res.code === 'UNVERIFIED') document.getElementById('login-resend').style.display = 'block';
+      if (res.code === 'OTP_REQUIRED') {            // 관리자 2차 인증: 인증번호 입력칸을 연다
+        otpRow.style.display = '';
+        showNotice(res.error);
+        document.getElementById('login-otp').focus();
+        return;
+      }
+      if (res.code === 'OTP_EXPIRED') { otpRow.style.display = 'none'; document.getElementById('login-otp').value = ''; }
+      if (['DORMANT','PW_EXPIRED'].includes(res.code)) showNotice(res.error); else showErr(res.error);
+      if (['UNVERIFIED','DORMANT'].includes(res.code)) document.getElementById('login-resend').style.display = 'block';
       return;
     }
-    enterSystem({name:res.name, role:res.role, email:res.email, sessionToken:res.sessionToken});
+    otpRow.style.display = 'none'; document.getElementById('login-otp').value = '';
+    await enterSystem({name:res.name, role:res.role, email:res.email, sessionToken:res.sessionToken}, {fresh:true, previousLoginAt:res.previousLoginAt});
   } catch(e) { showErr('서버가 일시적으로 응답하지 않습니다. 1~2분 뒤 다시 시도해주세요. (' + e.message + ')'); }
   finally { api.onRetry = null; setLoading('btn-do-login', false, '로그인'); }
 }
 function setLoading(id, on, text) {
   const el=document.getElementById(id); if(el){el.disabled=on;el.textContent=text;}
 }
-async function enterSystem(user) {
+async function enterSystem(user, opts) {
+  opts = opts || {};
   currentUser = user;
   sessionStorage.setItem('currentUser', JSON.stringify(user));
   document.getElementById('login-screen').style.display = 'none';
@@ -865,6 +885,28 @@ async function enterSystem(user) {
   startAutoRefresh();
   showPage(user.role==='admin' ? 'admin' : 'catalog', true); // 바로 위에서 이미 불러왔으므로 관리자 화면에서 재조회하지 않음
   notifyPendingReportsIfAny();
+  if (opts.fresh) showLoginNotice(opts.previousLoginAt);   // 새로 로그인했을 때만(새로고침으로 복원된 세션에서는 표시 안 함)
+}
+// 로그인 성공 직후 보안 경고와 직전 로그인 일시를 보여준다
+function showLoginNotice(prevMs) {
+  const when = prevMs
+    ? new Date(prevMs).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false })
+    : '기록 없음 (이번 로그인부터 기록됩니다)';
+  document.getElementById('modal-title').textContent = '🔐 보안 안내';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="font-size:13px;line-height:1.8">
+      <p>계정 관리 책임은 본인에게 있으므로 <b>타인에게 계정을 공유하거나 양도할 수 없습니다.</b></p>
+      <p>로그인 후 개인정보 조회 등 모든 활동은 기록되어 모니터링됩니다.</p>
+      <div style="margin-top:12px;padding:10px 12px;background:var(--card);border-radius:8px">
+        <span style="color:var(--muted)">이전 마지막 로그인 일시</span><br><b>${esc(when)}</b>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">본인이 접속한 시각이 아니라면 바로 비밀번호를 변경하고 관리자에게 알려주세요.</div>
+      </div>
+    </div>`;
+  document.getElementById('modal-confirm').style.display = '';
+  document.getElementById('modal-confirm').textContent = '확인';
+  document.getElementById('modal-confirm').onclick = closeModal;
+  document.querySelector('.btn-cancel').style.display = 'none';
+  document.getElementById('modal-overlay').classList.add('open');
 }
 // 로그인한 본인 명의로 배부완료됐지만 아직 결과보고를 등록하지 않은 건이 있으면 안내
 function notifyPendingReportsIfAny() {
@@ -905,6 +947,45 @@ function startIdleWatch() {
   }
   resetIdleTimer();
 }
+// ── 비밀번호 변경 ──
+function showChangePassword() {
+  document.getElementById('modal-title').textContent = '🔑 비밀번호 변경';
+  document.getElementById('modal-body').innerHTML = `
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">${PASSWORD_RULE_TEXT}<br>최근 사용한 비밀번호 3개는 다시 쓸 수 없고, 변경한 지 1일이 지나야 다시 바꿀 수 있습니다. 변경하면 다른 기기의 로그인은 모두 종료됩니다.</p>
+    <div style="margin-bottom:10px"><label style="font-size:12px;font-weight:700;color:var(--muted)">현재 비밀번호</label>
+      <input id="cp-cur" type="password" autocomplete="current-password" style="width:100%;margin-top:5px;padding:10px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none"></div>
+    <div style="margin-bottom:10px"><label style="font-size:12px;font-weight:700;color:var(--muted)">새 비밀번호</label>
+      <input id="cp-new" type="password" autocomplete="new-password" style="width:100%;margin-top:5px;padding:10px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none"></div>
+    <div><label style="font-size:12px;font-weight:700;color:var(--muted)">새 비밀번호 확인</label>
+      <input id="cp-new2" type="password" autocomplete="new-password" style="width:100%;margin-top:5px;padding:10px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none" onkeydown="if(event.key==='Enter')submitChangePassword()"></div>
+    <p id="cp-err" style="color:var(--red);font-size:12px;margin-top:8px;display:none"></p>`;
+  document.getElementById('modal-confirm').style.display = '';
+  document.getElementById('modal-confirm').textContent = '변경';
+  document.getElementById('modal-confirm').onclick = submitChangePassword;
+  document.querySelector('.btn-cancel').style.display = '';
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('cp-cur')?.focus(), 50);
+}
+async function submitChangePassword() {
+  const cur = document.getElementById('cp-cur').value, nw = document.getElementById('cp-new').value, nw2 = document.getElementById('cp-new2').value;
+  const err = document.getElementById('cp-err');
+  const show = m => { err.textContent = m; err.style.display = 'block'; };
+  err.style.display = 'none';
+  if (!cur) { show('현재 비밀번호를 입력해주세요.'); return; }
+  const perr = validatePasswordPolicy(nw, currentUser?.name);
+  if (perr) { show(perr); return; }
+  if (nw !== nw2) { show('새 비밀번호가 일치하지 않습니다.'); return; }
+  if (nw === cur) { show('현재 비밀번호와 다른 비밀번호를 입력해주세요.'); return; }
+  const btn = document.getElementById('modal-confirm'); btn.disabled = true; btn.textContent = '변경 중...';
+  try {
+    const res = await api('changePassword', { currentPassword: cur, newPassword: nw });
+    if (!res.ok) { show(res.error || '변경하지 못했습니다.'); return; }
+    closeModal();
+    toast('✅ 비밀번호가 변경되었습니다. 다른 기기의 로그인은 종료되었습니다.');
+  } catch (e) { show('서버가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도해주세요.'); }
+  finally { btn.disabled = false; btn.textContent = '변경'; }
+}
+
 function doLogout(skipServer) {
   // 서버에서도 이 로그인 세션을 폐기한다(응답은 기다리지 않는다)
   const _tok = currentUser?.sessionToken;
@@ -1621,6 +1702,7 @@ function generatePickList() {
   }).join('');
 
   const today = new Date().toLocaleDateString('ko-KR');
+  api('logExport', { kind: '피킹리스트', count: reqs.length }).catch(()=>{});   // 출력 사실을 접속로그에 남김
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>창고 피킹리스트 ${today}</title>
     <style>
@@ -1847,8 +1929,9 @@ async function loadAdminAccounts() {
   if (!document.getElementById('acct-search')) {
     el.innerHTML = `
       <div style="font-size:12px;color:var(--muted);line-height:1.7;margin:6px 0 12px">
-        비밀번호를 잊은 직원의 <b>가입 이메일로 재설정 링크(30분 유효)</b>를 보냅니다. 링크는 화면에 표시되지 않으며, 계정과 신청 내역은 그대로 유지됩니다.<br>
-        로그인 잠금(5회 실패)도 함께 풀립니다. 처리 내역은 접속로그에 남습니다.
+        <b>비밀번호 초기화</b>: 가입 이메일로 재설정 링크(30분 유효)를 보냅니다. 링크는 화면에 표시되지 않으며 로그인 잠금도 함께 풀립니다.<br>
+        <b>권한 변경</b>: 직원 ↔ 관리자. 바꾸면 그 사람은 다시 로그인해야 새 권한이 적용됩니다. <b>사용 중지</b>: 퇴사·이동 등으로 더 이상 쓰지 않는 계정을 막습니다(신청 내역은 그대로 남고 이름은 다른 사람이 가입할 수 없습니다).<br>
+        모든 처리는 접속로그에 남습니다.
       </div>
       <div style="display:flex;gap:8px;margin-bottom:10px">
         <input id="acct-search" type="text" placeholder="이름으로 검색" oninput="renderAdminAccountRows()" style="flex:1;max-width:320px;padding:9px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;outline:none">
@@ -1870,19 +1953,61 @@ function renderAdminAccountRows() {
   const q = (document.getElementById('acct-search')?.value || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const list = adminAccounts.filter(a => !q || a.name.toLowerCase().includes(q));
   if (list.length === 0) { box.innerHTML = `<div class="empty"><div class="emoji">🔍</div><p>${q ? '검색 결과가 없습니다' : '계정이 없습니다'}</p></div>`; return; }
-  box.innerHTML = `<table><thead><tr><th>이름</th><th>권한</th><th>등록 이메일</th><th>상태</th><th>가입일</th><th></th></tr></thead>
+  box.innerHTML = `<table><thead><tr><th>이름</th><th>권한</th><th>등록 이메일</th><th>상태</th><th>마지막 접속</th><th></th></tr></thead>
     <tbody>${list.map(a => {
       const idx = adminAccounts.indexOf(a);
       const badges = [
         a.role === 'admin' ? '<span style="background:#EDE7FF;color:#5B3FC4;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">관리자</span>' : '직원',
       ];
-      const state = [a.pendingVerification ? '<span style="color:#B7791F;font-weight:700">이메일 인증 대기</span>' : '정상'];
+      const state = [];
+      if (a.disabled) state.push('<span style="color:var(--red);font-weight:700">⛔ 사용 중지</span>');
+      else if (a.pendingVerification) state.push('<span style="color:#B7791F;font-weight:700">이메일 인증 대기</span>');
+      else if (a.dormant) state.push('<span style="color:#B7791F;font-weight:700">장기 미접속(인증 대기)</span>');
+      else state.push('정상');
       if (a.locked) state.push('<span style="color:var(--red);font-weight:700">🔒 로그인 잠김</span>');
+      const last = a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' }) : '-';
+      const btn = (fn, label, bg, fg) => `<button onclick="${fn}(${idx})" style="padding:5px 10px;border:none;border-radius:6px;background:${bg};color:${fg};font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">${label}</button>`;
       return `<tr>
-        <td><b>${esc(a.name)}</b></td><td>${badges[0]}</td><td>${esc(a.email)}</td><td>${state.join(' · ')}</td><td style="font-size:12px;color:var(--muted)">${esc(a.joinedAt)}</td>
-        <td style="text-align:right"><button onclick="resetAccountPassword(${idx})" style="padding:5px 12px;border:none;border-radius:6px;background:var(--kakao);color:var(--on-primary);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">🔑 비밀번호 초기화</button></td>
+        <td><b>${esc(a.name)}</b></td><td>${badges[0]}</td><td>${esc(a.email)}</td><td>${state.join(' · ')}</td><td style="font-size:12px;color:var(--muted)">${esc(last)}</td>
+        <td style="text-align:right;display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
+          ${btn('resetAccountPassword','🔑 초기화','var(--kakao)','var(--on-primary)')}
+          ${btn('toggleAccountRole', a.role==='admin' ? '직원으로 변경' : '관리자로 변경','var(--card)','var(--text)')}
+          ${btn('toggleAccountDisabled', a.disabled ? '사용 재개' : '사용 중지', a.disabled ? 'var(--green)' : '#fff', a.disabled ? '#fff' : 'var(--red)')}
+        </td>
       </tr>`;
     }).join('')}</tbody></table>`;
+}
+let _acctBusy = false;
+async function toggleAccountRole(idx) {
+  const a = adminAccounts[idx]; if (!a || _acctBusy) return;
+  const to = a.role === 'admin' ? 'team' : 'admin';
+  if (!confirm(`"${a.name}" 님의 권한을 ${to === 'admin' ? '관리자' : '직원'}(으)로 바꿀까요?\n\n· 그 사람은 다시 로그인해야 새 권한이 적용됩니다.\n· 처리 내역은 접속로그에 기록됩니다.`)) return;
+  _acctBusy = true;
+  try {
+    const res = await api('setAccountRole', { targetName: a.name, role: to });
+    if (!res.ok) { toast('❌ ' + (res.error || '처리하지 못했습니다')); return; }
+    toast(`✅ ${a.name} 님의 권한을 ${to === 'admin' ? '관리자' : '직원'}(으)로 바꿨습니다`);
+    loadAdminAccounts();
+  } catch (e) { toast('❌ 서버 오류: ' + e.message); }
+  finally { _acctBusy = false; }
+}
+async function toggleAccountDisabled(idx) {
+  const a = adminAccounts[idx]; if (!a || _acctBusy) return;
+  const disable = !a.disabled;
+  let reason = '';
+  if (disable) {
+    reason = prompt(`"${a.name}" 님의 계정 사용을 중지합니다.\n사유를 입력하세요 (예: 퇴사, 부서 이동)`, '');
+    if (reason === null) return;
+    if (!reason.trim()) { toast('❌ 사유를 입력해주세요'); return; }
+  } else if (!confirm(`"${a.name}" 님의 계정 사용을 다시 허용할까요?`)) return;
+  _acctBusy = true;
+  try {
+    const res = await api('setAccountDisabled', { targetName: a.name, disabled: disable, reason: reason.trim() });
+    if (!res.ok) { toast('❌ ' + (res.error || '처리하지 못했습니다')); return; }
+    toast(disable ? `⛔ ${a.name} 님의 계정을 중지했습니다` : `✅ ${a.name} 님의 계정을 다시 사용할 수 있습니다`);
+    loadAdminAccounts();
+  } catch (e) { toast('❌ 서버 오류: ' + e.message); }
+  finally { _acctBusy = false; }
 }
 let _acctResetting = false;
 async function resetAccountPassword(idx) {
@@ -2707,6 +2832,7 @@ function downloadMyReqExcel() {
   const a = document.createElement('a');
   a.href = url;
   a.download = `주문내역_${currentUser.name}_${new Date().toISOString().slice(0,10)}.csv`;
+  api('logExport', { kind: '주문내역CSV', count: rows.length - 1 }).catch(()=>{});   // 내려받기 사실을 접속로그에 남김
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
