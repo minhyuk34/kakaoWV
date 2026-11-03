@@ -651,6 +651,30 @@ const PRODUCTS = [{"id": 1, "num": "001", "name": "넷플릭스 오징어게임X
 let cart = {};
 let currentUser = null;
 let currentAdminTab = 'requests';
+// ── 관리자 기능 권한 ── (서버가 같은 규칙으로 막는다. 여기서는 쓸 수 없는 메뉴·버튼을 숨기기만 한다)
+const PERM_DEFS = [
+  ['req','신청 관리','신청 승인·반려·수정·취소 처리·합치기·출고메모·일정 저장'],
+  ['dist','배부 처리','배부 저장·실배부 수정·반품·신청 외 물품 추가 지급'],
+  ['stock','재고 관리','재고 수정·제품 차단·재고 재계산·재고 진단'],
+  ['report','배부현황·의견','배부현황 시트 새로고침, 시스템 피드백 조회'],
+  ['accounts','계정 관리','비밀번호 초기화·권한 변경·사용 중지·기능 권한 설정'],
+  ['pii','개인정보 열람','다른 사람 신청의 연락처·이메일 열람(없으면 가려서 표시) 및 내려받기·출력'],
+];
+const ADMIN_TAB_PERMS = { requests:['req'], inventory:['stock'], history:['req','dist'], audit:['stock'], accounts:['accounts'] };
+function can(k) { return currentUser?.role === 'admin' && (!Array.isArray(currentUser.perms) || currentUser.perms.includes(k)); }
+function canAdminTab(t) { return (ADMIN_TAB_PERMS[t] || []).some(can); }
+function applyAdminPerms() {
+  const order = ['requests','inventory','history','audit','accounts'];
+  document.querySelectorAll('#page-admin .tabs .tab').forEach(b => {
+    const m = (b.getAttribute('onclick') || '').match(/adminTab\('(\w+)'/);
+    if (m) b.style.display = canAdminTab(m[1]) ? '' : 'none';
+  });
+  if (canAdminTab(currentAdminTab)) return;
+  const first = order.find(canAdminTab);
+  currentAdminTab = first || 'none';
+  document.querySelectorAll('#page-admin .tabs .tab').forEach(b => b.classList.toggle('active', !!first && (b.getAttribute('onclick') || '').includes("'" + first + "'")));
+  order.forEach(k => { const el = document.getElementById('admin-' + k); if (el) el.style.display = k === first ? '' : 'none'; });
+}
 // stockCache: { num: { current, original } }
 let stockCache = {};
 Object.keys(STOCK_DATA).forEach(k => {
@@ -843,7 +867,7 @@ async function doRegister() {
       return;
     }
     if (!res.ok) { showErr(res.error); return; }
-    enterSystem({name:res.name, role:res.role, email:res.email, sessionToken:res.sessionToken});
+    enterSystem({name:res.name, role:res.role, email:res.email, perms:res.perms, sessionToken:res.sessionToken});
   } catch(e) { showErr('서버 연결 실패. 잠시 후 다시 시도해주세요.'); }
   finally { setLoading('btn-do-register', false, '계정 만들기'); }
 }
@@ -875,7 +899,7 @@ async function doLogin() {
       return;
     }
     otpRow.style.display = 'none'; document.getElementById('login-otp').value = '';
-    await enterSystem({name:res.name, role:res.role, email:res.email, sessionToken:res.sessionToken}, {fresh:true, previousLoginAt:res.previousLoginAt});
+    await enterSystem({name:res.name, role:res.role, email:res.email, perms:res.perms, sessionToken:res.sessionToken}, {fresh:true, previousLoginAt:res.previousLoginAt});
   } catch(e) { showErr('서버가 일시적으로 응답하지 않습니다. 1~2분 뒤 다시 시도해주세요. (' + e.message + ')'); }
   finally { api.onRetry = null; setLoading('btn-do-login', false, '로그인'); }
 }
@@ -891,6 +915,7 @@ async function enterSystem(user, opts) {
   document.getElementById('userInfo').textContent = `👤 ${user.name}${user.role==='admin' ? ' (관리자)' : ''}`;
   document.getElementById('btn-admin').style.display = user.role==='admin' ? '' : 'none';
   cart={};
+  applyAdminPerms();
   startIdleWatch();
   await Promise.all([loadStockFromAPI(), loadRequestsFromAPI()]);
   updateCartBadge(); updateStats();
@@ -1483,6 +1508,12 @@ async function saveDistLogEntry(reqId, idx) {
 
 // ── 관리자 ──
 function renderAdmin() {
+  if (!['requests','inventory','history','audit','accounts'].some(canAdminTab)) {
+    document.getElementById('admin-dash').innerHTML = '';
+    document.getElementById('admin-requests').style.display = '';
+    document.getElementById('admin-requests').innerHTML = '<div class="empty"><div class="emoji">🔒</div><p>이 계정에는 관리자 기능 권한이 부여되지 않았습니다.<br>계정 관리 권한이 있는 관리자에게 요청해주세요.</p></div>';
+    return;
+  }
   const reqs=getRequests();
   const pending=reqs.filter(r=>r.status==='pending').length;
   const approved=reqs.filter(r=>r.status==='approved').length;
@@ -1811,10 +1842,10 @@ function renderAdminInventory() {
 
   const thStyle = 'position:sticky;top:0;background:var(--card);color:var(--text);z-index:1';
   el.innerHTML=`<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-    <button onclick="refreshReportSheet()" id="report-refresh-btn"
+    ${can('report') ? `<button onclick="refreshReportSheet()" id="report-refresh-btn"
       style="background:var(--kakao);color:var(--on-primary);border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer">
       📊 배부현황 시트 새로고침
-    </button>
+    </button>` : ''}
   </div>
   <div style="max-height:70vh;overflow-y:auto;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
   <table style="overflow:visible;box-shadow:none;border-radius:0">
@@ -1942,7 +1973,7 @@ async function loadAdminAccounts() {
     el.innerHTML = `
       <div style="font-size:12px;color:var(--muted);line-height:1.7;margin:6px 0 12px">
         <b>비밀번호 초기화</b>: 가입 이메일로 재설정 링크(30분 유효)를 보냅니다. 링크는 화면에 표시되지 않으며 로그인 잠금도 함께 풀립니다.<br>
-        <b>권한 변경</b>: 직원 ↔ 관리자. 바꾸면 그 사람은 다시 로그인해야 새 권한이 적용됩니다. <b>사용 중지</b>: 퇴사·이동 등으로 더 이상 쓰지 않는 계정을 막습니다(신청 내역은 그대로 남고 이름은 다른 사람이 가입할 수 없습니다).<br>
+        <b>권한 변경</b>: 직원 ↔ 관리자. 바꾸면 그 사람은 다시 로그인해야 새 권한이 적용됩니다. <b>기능 권한</b>: 관리자별로 쓸 수 있는 기능(신청 관리·배부 처리·재고 관리 등)을 나눕니다. <b>사용 중지</b>: 퇴사·이동 등으로 더 이상 쓰지 않는 계정을 막습니다(신청 내역은 그대로 남고 이름은 다른 사람이 가입할 수 없습니다).<br>
         모든 처리는 접속로그에 남습니다.
       </div>
       <div style="display:flex;gap:8px;margin-bottom:10px">
@@ -1965,7 +1996,7 @@ function renderAdminAccountRows() {
   const q = (document.getElementById('acct-search')?.value || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const list = adminAccounts.filter(a => !q || a.name.toLowerCase().includes(q));
   if (list.length === 0) { box.innerHTML = `<div class="empty"><div class="emoji">🔍</div><p>${q ? '검색 결과가 없습니다' : '계정이 없습니다'}</p></div>`; return; }
-  box.innerHTML = `<table><thead><tr><th>이름</th><th>권한</th><th>등록 이메일</th><th>상태</th><th>마지막 접속</th><th></th></tr></thead>
+  box.innerHTML = `<table><thead><tr><th>이름</th><th>권한</th><th>기능 권한</th><th>등록 이메일</th><th>상태</th><th>마지막 접속</th><th></th></tr></thead>
     <tbody>${list.map(a => {
       const idx = adminAccounts.indexOf(a);
       const badges = [
@@ -1980,14 +2011,54 @@ function renderAdminAccountRows() {
       const last = a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' }) : '-';
       const btn = (fn, label, bg, fg) => `<button onclick="${fn}(${idx})" style="padding:5px 10px;border:none;border-radius:6px;background:${bg};color:${fg};font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">${label}</button>`;
       return `<tr>
-        <td><b>${esc(a.name)}</b></td><td>${badges[0]}</td><td>${esc(a.email)}</td><td>${state.join(' · ')}</td><td style="font-size:12px;color:var(--muted)">${esc(last)}</td>
+        <td><b>${esc(a.name)}</b></td><td>${badges[0]}</td><td style="font-size:12px;color:var(--muted)">${esc(permSummary(a))}</td><td>${esc(a.email)}</td><td>${state.join(' · ')}</td><td style="font-size:12px;color:var(--muted)">${esc(last)}</td>
         <td style="text-align:right;display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
           ${btn('resetAccountPassword','🔑 초기화','var(--kakao)','var(--on-primary)')}
+          ${a.role==='admin' ? btn('editAccountPerms','🧩 기능 권한','var(--card)','var(--text)') : ''}
           ${btn('toggleAccountRole', a.role==='admin' ? '직원으로 변경' : '관리자로 변경','var(--card)','var(--text)')}
           ${btn('toggleAccountDisabled', a.disabled ? '사용 재개' : '사용 중지', a.disabled ? 'var(--green)' : '#fff', a.disabled ? '#fff' : 'var(--red)')}
         </td>
       </tr>`;
     }).join('')}</tbody></table>`;
+}
+function permSummary(a) {
+  if (a.role !== 'admin') return '-';
+  const p = a.perms || [];
+  if (p.length === PERM_DEFS.length) return '전체';
+  if (!p.length) return '없음';
+  return PERM_DEFS.filter(d => p.includes(d[0])).map(d => d[1]).join(', ');
+}
+function editAccountPerms(idx) {
+  const a = adminAccounts[idx]; if (!a) return;
+  if (a.name === currentUser?.name) { alert('본인의 기능 권한은 직접 바꿀 수 없습니다. 다른 관리자에게 요청해주세요.'); return; }
+  document.getElementById('modal-title').textContent = `🧩 ${a.name} 님의 기능 권한`;
+  document.getElementById('modal-body').innerHTML = `
+    <p style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6">관리자 중에서도 맡은 기능만 쓰도록 권한을 나눕니다. 저장하면 그 사람은 다시 로그인해야 새 권한이 적용됩니다. 처리 내역은 접속로그에 기록됩니다.</p>
+    ${PERM_DEFS.map(d => `<label style="display:flex;gap:10px;align-items:flex-start;padding:8px 6px;border-bottom:1px solid var(--border);cursor:pointer">
+      <input type="checkbox" class="perm-chk" value="${d[0]}" ${(a.perms||[]).includes(d[0])?'checked':''} style="margin-top:3px">
+      <span><b style="font-size:13px">${d[1]}</b><br><span style="font-size:12px;color:var(--muted)">${d[2]}</span></span></label>`).join('')}
+    <p id="perm-err" style="color:var(--red);font-size:12px;margin-top:8px;display:none"></p>`;
+  const ok = document.getElementById('modal-confirm');
+  ok.style.display = ''; ok.textContent = '저장'; ok.disabled = false;
+  ok.onclick = () => submitAccountPerms(idx);
+  document.querySelector('.btn-cancel').style.display = '';
+  document.getElementById('modal-overlay').classList.add('open');
+}
+async function submitAccountPerms(idx) {
+  const a = adminAccounts[idx]; if (!a || _acctBusy) return;
+  const perms = [...document.querySelectorAll('.perm-chk')].filter(c => c.checked).map(c => c.value);
+  const err = document.getElementById('perm-err');
+  if (perms.length === 0 && !confirm(`"${a.name}" 님에게 부여하는 기능 권한이 하나도 없습니다.\n관리자 화면에서 아무 기능도 쓸 수 없게 됩니다. 계속할까요?`)) return;
+  const btn = document.getElementById('modal-confirm'); btn.disabled = true; btn.textContent = '저장 중...';
+  _acctBusy = true;
+  try {
+    const res = await api('setAccountPerms', { targetName: a.name, perms });
+    if (!res.ok) { err.textContent = res.error || '저장하지 못했습니다.'; err.style.display = 'block'; return; }
+    closeModal();
+    toast(`✅ ${a.name} 님의 기능 권한을 저장했습니다`);
+    loadAdminAccounts();
+  } catch (e) { err.textContent = '서버가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도해주세요.'; err.style.display = 'block'; }
+  finally { _acctBusy = false; btn.disabled = false; btn.textContent = '저장'; }
 }
 let _acctBusy = false;
 async function toggleAccountRole(idx) {
@@ -2233,7 +2304,7 @@ function toggleSelectAllHistory(cb) {
 }
 function updateHistoryMergeBtn() {
   const btn = document.getElementById('history-merge-btn');
-  if (btn) btn.textContent = `🔗 선택 ${selectedHistoryIds.size}건 배부 합치기`;
+  if (btn) { btn.style.display = can('req') ? '' : 'none'; btn.textContent = `🔗 선택 ${selectedHistoryIds.size}건 배부 합치기`; }
 }
 function renderAdminHistory() {
   const all = getRequests().filter(r=>r.status==='distributed'||r.status==='rejected'||r.status==='cancelled');
@@ -2388,6 +2459,7 @@ function showDetail(id) {
   const r = getRequests().find(x => String(x.id) === String(id));
   if (!r) return false;
   const isAdmin   = currentUser?.role === 'admin';
+  const canReq = can('req'), canDist = can('dist');   // 기능 권한별로 버튼 표시
   const isPending = r.status === 'pending';
   const isApproved= r.status === 'approved';
 
@@ -2414,17 +2486,17 @@ function showDetail(id) {
     let actionBtn = '';
     if (isCancelled) {
       actionBtn = `<span style="font-size:10px;background:#f8d7da;color:#721c24;padding:2px 6px;border-radius:10px">취소됨</span>`;
-    } else if (isAdmin && cancelRequested) {
+    } else if (canReq && cancelRequested) {
       actionBtn = `<button onclick="confirmCancelItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:none;border-radius:5px;background:var(--red);color:#fff;cursor:pointer;white-space:nowrap">✓ 취소확정</button>
         <button onclick="rejectCancelItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#888;cursor:pointer;white-space:nowrap;margin-left:3px">✕ 거절</button>`;
-    } else if (isAdmin && isPending && !approved) {
+    } else if (canReq && isPending && !approved) {
       actionBtn = `<button onclick="approveItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:none;border-radius:5px;background:var(--green);color:#fff;cursor:pointer;white-space:nowrap">✓ 승인</button>
         <button onclick="cancelItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#888;cursor:pointer;white-space:nowrap;margin-left:3px">✕ 취소</button>`;
-    } else if (isAdmin && isApproved && !distributed && !cancelRequested) {
+    } else if (canReq && isApproved && !distributed && !cancelRequested) {
       // 배부 실행은 신청상세에서 하지 않고 하단의 "📦 배부 처리하기" 버튼(항목별 배부처리 화면)에서
       // 한 번에 처리하도록 일원화 — 여기서는 검토/취소만
       actionBtn = `<button onclick="cancelItem('${id}',${idx})" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#888;cursor:pointer;white-space:nowrap">✕ 취소</button>`;
-    } else if (isAdmin && distributed) {
+    } else if (canDist && distributed) {
       // 배부완료 후 실배부수량이 잘못 기록된 경우 직접 정정, 또는 일부/전체 반품 처리
       const remainDist = i.distributedQty ?? i.qty;
       const safeName = i.name.replace(/'/g, "\\'");
@@ -2434,7 +2506,7 @@ function showDetail(id) {
       }
     }
 
-    const canEditQty = isAdmin && !isCancelled && !distributed;
+    const canEditQty = canReq && !isCancelled && !distributed;
 
     return `<div style="padding:8px 4px;border-bottom:1px solid var(--border)">
       <div style="display:grid;grid-template-columns:1fr 65px 105px auto auto;gap:6px;align-items:center;font-size:13px">
@@ -2469,21 +2541,21 @@ function showDetail(id) {
 
   // 전체 액션 버튼
   let bulkBtns = '';
-  if (isAdmin && isPending) {
+  if (canReq && isPending) {
     bulkBtns = `<div style="display:flex;gap:8px;margin-top:12px">
       <button onclick="approveAllItems('${id}')" style="flex:1;padding:11px;border:none;border-radius:8px;background:var(--green);color:#fff;font-size:14px;font-weight:700;cursor:pointer">✓ 전체 승인</button>
       <button onclick="promptReject('${id}')" style="padding:11px 16px;border:none;border-radius:8px;background:var(--red);color:#fff;font-size:14px;font-weight:700;cursor:pointer">✗ 반려</button>
       <button onclick="cancelAllItems('${id}')" style="padding:11px 16px;border:1.5px solid var(--red);border-radius:8px;background:#fff;color:var(--red);font-size:14px;font-weight:700;cursor:pointer">🚫 전체취소</button>
     </div>`;
-  } else if (isAdmin && isApproved) {
+  } else if ((canDist || canReq) && isApproved) {
     bulkBtns = `<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
-      <button onclick="showDistributeModal('${id}')" style="width:100%;padding:11px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px;font-weight:700;cursor:pointer">📦 배부 처리하기</button>
-      <button onclick="cancelAllItems('${id}')" style="width:100%;padding:10px;border:1.5px solid var(--red);border-radius:8px;background:#fff;color:var(--red);font-size:13px;font-weight:700;cursor:pointer">🚫 전체취소</button>
+      ${canDist ? `<button onclick="showDistributeModal('${id}')" style="width:100%;padding:11px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px;font-weight:700;cursor:pointer">📦 배부 처리하기</button>` : ''}
+      ${canReq ? `<button onclick="cancelAllItems('${id}')" style="width:100%;padding:10px;border:1.5px solid var(--red);border-radius:8px;background:#fff;color:var(--red);font-size:13px;font-weight:700;cursor:pointer">🚫 전체취소</button>` : ''}
     </div>`;
   }
 
   // 신청하지 않은 물품을 관리자가 추가로 지급 (취소된 신청은 제외)
-  const addItemSection = (isAdmin && r.status !== 'cancelled') ? `
+  const addItemSection = (canDist && r.status !== 'cancelled') ? `
     <div style="margin-top:14px;padding:10px 12px;background:#F5F3FF;border-radius:8px">
       <div style="font-size:12px;font-weight:700;color:#6D28D9;margin-bottom:6px">➕ 신청 외 물품 추가 지급</div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -2502,7 +2574,7 @@ function showDetail(id) {
       <div><span style="color:var(--muted)">이름</span> &nbsp;<b>${esc(r.name)||'-'}</b></div>
       <div><span style="color:var(--muted)">연락처</span> &nbsp;<b>${esc(r.contact)||'-'}</b></div>
       <div style="grid-column:1/-1"><span style="color:var(--muted)">사용처</span> &nbsp;<b>${esc(r.reason)||'-'}</b></div>
-      ${isAdmin ? `
+      ${canReq ? `
       <div><span style="color:var(--muted)">수취예정일</span> &nbsp;<input id="sched-pickupDate-${r.id}" type="date" value="${dateOnly(r.pickupDate)}" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
       <div><span style="color:var(--muted)">사용예정일</span> &nbsp;<input id="sched-useDate-${r.id}" type="date" value="${dateOnly(r.useDate)}" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
       <div><span style="color:var(--muted)">배부일</span> &nbsp;<input id="sched-plannedDate-${r.id}" type="date" value="${dateOnly(r.plannedDate)}" style="font-size:13px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px"></div>
@@ -2700,7 +2772,7 @@ async function loadFeedback() {
     const wrap = document.getElementById('feedback-list-wrap');
     const list = document.getElementById('feedback-list');
     // 피드백 목록은 관리자만 볼 수 있다(서버도 관리자만 허용) — 일반 직원은 요청 자체를 보내지 않는다
-    if (!isAdmin) { wrap.style.display = 'none'; return; }
+    if (!isAdmin || !can('report')) { wrap.style.display = 'none'; return; }
     const res = await api('getFeedback', {});
     if (!res.ok) return;
     if (res.feedbacks.length === 0) { wrap.style.display = 'none'; return; }
@@ -2790,7 +2862,7 @@ async function refreshAdmin(auto) {
   // 재고는 이미 각 처리 시점에 실시간으로 반영되므로, 자동 새로고침에서는 생략하고
   // 사람이 직접 "새로고침"을 눌렀을 때만 재계산한다.
   window.__bgRefresh = !!auto;
-  if (!auto) { try { await api('syncStock'); } catch(e) {} }
+  if (!auto && can('stock')) { try { await api('syncStock'); } catch(e) {} }
   // 사람이 직접 누른 새로고침은 캐시를 건너뛰고 항상 최신 값을 받아온다(force) —
   // 자동 새로고침(auto)은 캐시를 그대로 활용해 서버 부담을 줄인다.
   try { await Promise.all([loadStockFromAPI(), loadRequestsFromAPI(!auto)]); }

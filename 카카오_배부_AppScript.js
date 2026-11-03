@@ -740,9 +740,9 @@ function onEdit(e) {
     const sh = e.range.getSheet();
     if (sh.getName() !== SHEET_ACCT || e.range.getRow() < 2) return;
     const col = e.range.getColumn();
-    const labels = { 1: '이름', 2: '비밀번호', 3: '권한', 4: '이메일' };
+    const labels = { 1: '이름', 2: '비밀번호', 3: '권한', 4: '이메일', 15: '기능권한' };
     let note = (labels[col] || ('열 ' + col)) + ' 수정';
-    if (col === 3) note += ': ' + cleanText_(e.oldValue) + ' → ' + cleanText_(e.value);
+    if (col === 3 || col === 15) note += ': ' + cleanText_(e.oldValue) + ' → ' + cleanText_(e.value);
     if (col === 4) note += ': ' + maskEmail_(e.oldValue) + ' → ' + maskEmail_(e.value);
     const target = cleanText_(sh.getRange(e.range.getRow(), 1).getValue()).slice(0, 40);
     const log = e.source.getSheetByName(SHEET_AUDIT);
@@ -944,6 +944,7 @@ function doPost(e) {
     else if (action === 'changePassword')    result = changePassword(data, session);
     else if (action === 'setAccountRole')    result = setAccountRole(data);
     else if (action === 'setAccountDisabled') result = setAccountDisabled(data);
+    else if (action === 'setAccountPerms')   result = setAccountPerms(data);
     else if (action === 'logExport')         result = logExport(data);
     else if (action === 'adminResetPassword') result = adminResetPasswordAction(data);
     else result = { ok: false, error: '알 수 없는 action' };
@@ -1025,7 +1026,8 @@ const OTP_TTL_SEC = 600, OTP_MAX_TRIES = 5;
 // 계정 시트 열(0부터): 0 이름, 1 비밀번호, 2 권한, 3 이메일, 4 가입일, 5 재설정토큰, 6 재설정만료,
 //   7 인증상태('N' 가입 인증대기 / 'D' 장기 미접속 인증대기 / 'Y'·빈칸 정상), 8 인증토큰, 9 인증만료,
 //   10 비밀번호 변경시각(ms), 11 비밀번호 이력(JSON, 최근 N개), 12 마지막 로그인(ms), 13 사용중지('Y')
-const COL_PWAT = 10, COL_PWHIST = 11, COL_LASTLOGIN = 12, COL_DISABLED = 13;
+const COL_PWAT = 10, COL_PWHIST = 11, COL_LASTLOGIN = 12, COL_DISABLED = 13, COL_PERMS = 14;
+//   14 관리자 기능 권한: 빈칸 = 전체 / '-' = 없음 / 'req,dist,…' = 해당 기능만 (관리자 계정에만 의미가 있다)
 let _authFailReason = '';
 function validWvEmail_(e) { return /^[^\s@<>"']+@worldvision\.or\.kr$/i.test(String(e || '').trim()); }
 function parseHistory_(v) { try { const a = JSON.parse(String(v || '[]')); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
@@ -1054,14 +1056,42 @@ function claimSession_(name, jti) {
 }
 
 const PUBLIC_ACTIONS = ['register', 'login', 'findAccountByEmail', 'requestPasswordReset', 'resetPasswordWithToken', 'verifyEmail', 'resendVerification'];
-// 관리자만 실행할 수 있는 동작 (그 외 로그인 사용자 전용: getStock, getRequests, submitRequest, submitFeedback, logout)
-const ADMIN_ONLY_ACTIONS = [
-  'updateRequest', 'updateRequestSchedule', 'saveDispatchMemo', 'updateStock', 'setProductBlocked',
-  'syncStock', 'generateReport', 'approveItems', 'updateItemQty', 'returnDistributedQty',
-  'editDistributedQty', 'addAdminItem', 'distributeItems', 'mergeRequests',
-  'confirmCancelItem', 'rejectCancelItem', 'getFeedback', 'getAccounts', 'adminResetPassword',
-  'setAccountRole', 'setAccountDisabled'
-];
+// ── 관리자 기능 권한 ───────────────────────────────────────────
+// 관리자라도 맡은 기능만 쓸 수 있게 기능 묶음(권한)별로 나눈다. 권한은 계정 시트 O열에 저장하고,
+// 로그인할 때 토큰에 실려 서버가 요청마다 검사한다. (빈칸 = 전체 권한이라 기존 관리자는 그대로 쓴다)
+const PERM_KEYS = ['req', 'dist', 'stock', 'report', 'accounts', 'pii'];
+const PERM_LABELS = {
+  req: '신청 관리(승인·수정·취소 처리·합치기·출고메모)', dist: '배부 처리(배부 저장·수정·반환·추가지급)',
+  stock: '재고 관리(재고 수정·제품 차단·재계산)', report: '배부현황 갱신·만족도 의견 조회',
+  accounts: '계정 관리(비밀번호 초기화·권한·사용 중지)', pii: '신청자 연락처·이메일 열람 및 내려받기·출력'
+};
+// 동작 → 필요한 기능 권한. 여기에 있는 동작은 관리자만 실행할 수 있다.
+const ACTION_PERM = {
+  updateRequest: 'req', updateRequestSchedule: 'req', saveDispatchMemo: 'req', approveItems: 'req',
+  updateItemQty: 'req', confirmCancelItem: 'req', rejectCancelItem: 'req', mergeRequests: 'req',
+  distributeItems: 'dist', editDistributedQty: 'dist', returnDistributedQty: 'dist', addAdminItem: 'dist',
+  updateStock: 'stock', setProductBlocked: 'stock', syncStock: 'stock',
+  generateReport: 'report', getFeedback: 'report',
+  getAccounts: 'accounts', adminResetPassword: 'accounts', setAccountRole: 'accounts',
+  setAccountDisabled: 'accounts', setAccountPerms: 'accounts'
+};
+const ADMIN_ONLY_ACTIONS = Object.keys(ACTION_PERM);
+// 관리자가 남의 신청을 대신 처리할 때 필요한 권한(본인 신청이면 권한과 무관)
+const OWNER_ACTION_ADMIN_PERM = {
+  cancelRequest: 'req', cancelItems: 'req', requestCancelItem: 'req', mergeIntoRequest: 'req',
+  saveDistLog: 'dist', uploadReport: 'req'
+};
+function parsePerms_(v) {
+  const t = String(v === undefined || v === null ? '' : v).trim();
+  if (t === '') return PERM_KEYS.slice();
+  if (t === '-') return [];
+  return PERM_KEYS.filter(k => t.split(/[\s,]+/).indexOf(k) >= 0);
+}
+function serializePerms_(arr) {
+  const have = PERM_KEYS.filter(k => arr.indexOf(k) >= 0);
+  if (have.length === PERM_KEYS.length) return '';
+  return have.length === 0 ? '-' : have.join(',');
+}
 // 본인 신청만 다룰 수 있는 동작 → 신청 ID가 들어 있는 필드 이름 (관리자는 예외)
 const OWNER_ACTION_ID_FIELD = {
   cancelRequest: 'id', cancelItems: 'id', requestCancelItem: 'id',
@@ -1163,6 +1193,7 @@ function issueSession_(user, prev) {
     i0: i0,
     x: Math.min(now + AUTH_IDLE_SEC, i0 + AUTH_MAX_SEC)
   };
+  if (user.role === 'admin') payload.m = (user.perms || PERM_KEYS).join(',');
   const body = Utilities.base64EncodeWebSafe(JSON.stringify(payload), Utilities.Charset.UTF_8);
   return body + '.' + signBody_(body);
 }
@@ -1187,14 +1218,16 @@ function verifySession_(token) {
     const cur = cache.get('cs_' + sha256Hex_(p.n).slice(0, 32));
     if (cur && cur !== p.j) { _authFailReason = 'SUPERSEDED'; return null; }
   } catch (e) {}
-  return { name: p.n, role: p.r, email: p.e || '', jti: p.j, i0: p.i0, x: p.x };
+  // 권한 항목이 없는 예전 관리자 토큰은 전체 권한으로 본다(최대 6시간 뒤 새 로그인으로 교체됨)
+  const perms = p.r === 'admin' ? (p.m === undefined ? PERM_KEYS.slice() : parsePerms_(p.m === '' ? '-' : p.m)) : [];
+  return { name: p.n, role: p.r, email: p.e || '', jti: p.j, i0: p.i0, x: p.x, perms: perms };
 }
 // 활동 중인 사용자는 만료 전에 토큰을 갱신해 준다(남은 시간이 충분하면 그대로 둔다).
 function maybeRefreshSession_(sess) {
   const now = nowSec_();
   if (sess.x - now > AUTH_REFRESH_BELOW_SEC) return null;
   if (now >= sess.i0 + AUTH_MAX_SEC) return null;
-  return issueSession_({ name: sess.name, role: sess.role, email: sess.email }, { i0: sess.i0, j: sess.jti });
+  return issueSession_({ name: sess.name, role: sess.role, email: sess.email, perms: sess.perms }, { i0: sess.i0, j: sess.jti });
 }
 function revokeSession_(sess) {
   if (!sess) return;
@@ -1226,18 +1259,27 @@ function checkAccess_(action, data) {
   const forbidden = msg => ({ ok: false, session: sess, result: { ok: false, code: 'FORBIDDEN', error: msg || '권한이 없습니다.' } });
   const isAdmin = sess.role === 'admin';
 
+  const has = k => isAdmin && sess.perms.indexOf(k) >= 0;
+  const noPerm = k => forbidden(`이 기능을 쓸 권한이 없습니다. (필요 권한: ${String(PERM_LABELS[k]).split('(')[0]}) 계정 관리자에게 요청해주세요.`);
   if (ADMIN_ONLY_ACTIONS.indexOf(action) >= 0) {
     if (!isAdmin) return forbidden('관리자 권한이 필요합니다.');
+    if (!has(ACTION_PERM[action])) return noPerm(ACTION_PERM[action]);
     data.adminName = sess.name; // 관리자 이름은 클라이언트 값이 아니라 토큰 기준
   }
   const idField = OWNER_ACTION_ID_FIELD[action];
-  if (idField && !isAdmin) {
-    const owner = requestOwnerName_(data[idField]);
-    if (owner === null || normNameServer_(owner) !== normNameServer_(sess.name)) {
-      return forbidden('본인의 신청만 처리할 수 있습니다.');
+  if (idField) {
+    const needPerm = OWNER_ACTION_ADMIN_PERM[action];
+    if (!(isAdmin && has(needPerm))) {   // 해당 권한이 있는 관리자는 소유자 확인을 건너뛴다
+      const owner = requestOwnerName_(data[idField]);
+      if (owner === null || normNameServer_(owner) !== normNameServer_(sess.name)) {
+        return isAdmin ? noPerm(needPerm) : forbidden('본인의 신청만 처리할 수 있습니다.');
+      }
     }
   }
-  if (action === 'getRequests') { data.name = sess.name; data.role = sess.role; }
+  if (action === 'getRequests') {
+    data.name = sess.name; data.role = sess.role;
+    data.maskPii = isAdmin && !has('pii');   // 연락처·이메일 열람 권한이 없는 관리자에게는 타인의 값을 가려서 준다
+  }
   if (action === 'submitRequest' && !isAdmin) data.name = sess.name;
   return { ok: true, session: sess };
 }
@@ -1512,10 +1554,10 @@ function login(data) {
     s.getRange(idx + 1, COL_PWHIST + 1).setValue(JSON.stringify([String(row[1]).indexOf('v2$') === 0 ? row[1] : s.getRange(idx + 1, 2).getValue()]));
   }
   s.getRange(idx + 1, COL_LASTLOGIN + 1).setValue(now);
-  const user = { name: row[0], role: row[2], email: row[3] || '' };
+  const user = { name: row[0], role: row[2], email: row[3] || '', perms: String(row[2]) === 'admin' ? parsePerms_(row[COL_PERMS]) : [] };
   const jti = Utilities.getUuid();
   claimSession_(name, jti);
-  return { ok: true, name: user.name, role: user.role, email: user.email,
+  return { ok: true, name: user.name, role: user.role, email: user.email, perms: user.perms,
            sessionToken: issueSession_(user, { i0: nowSec_(), j: jti }), previousLoginAt: lastAt || null };
 }
 
@@ -1606,7 +1648,7 @@ function changePassword(data, sess) {
     revokeUserSessions_(sess.name);                       // 다른 기기의 로그인도 모두 폐기
     const jti = Utilities.getUuid();
     claimSession_(sess.name, jti);
-    const token = issueSession_({ name: rows[idx][0], role: rows[idx][2], email: rows[idx][3] || '' }, { i0: nowSec_(), j: jti });
+    const token = issueSession_({ name: rows[idx][0], role: rows[idx][2], email: rows[idx][3] || '', perms: String(rows[idx][2]) === 'admin' ? parsePerms_(rows[idx][COL_PERMS]) : [] }, { i0: nowSec_(), j: jti });
     return { ok: true, sessionToken: token };
   } finally { lock.releaseLock(); }
 }
@@ -1637,6 +1679,32 @@ function setAccountRole({ targetName, role, adminName }) {
     s.getRange(idx + 1, 3).setValue(role);
     revokeUserSessions_(name);   // 새 권한이 곧바로 적용되도록 기존 로그인은 폐기
     return { ok: true, name: name, role: role, auditNote: `권한 ${before} → ${role}` };
+  } finally { lock.releaseLock(); }
+}
+function permsText_(arr) {
+  return arr.length === PERM_KEYS.length ? '전체' : (arr.length ? arr.join('+') : '없음');
+}
+function setAccountPerms({ targetName, perms, adminName }) {
+  const name = cleanText_(targetName);
+  if (!name) return { ok: false, error: '대상 관리자를 선택해주세요.' };
+  if (!Array.isArray(perms) || perms.some(k => PERM_KEYS.indexOf(k) < 0)) return { ok: false, error: '올바르지 않은 권한 값입니다.' };
+  if (normNameServer_(name) === normNameServer_(adminName)) return { ok: false, error: '본인의 기능 권한은 직접 바꿀 수 없습니다. 다른 관리자에게 요청해주세요.' };
+  const want = PERM_KEYS.filter(k => perms.indexOf(k) >= 0);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = sheet(SHEET_ACCT);
+    const rows = s.getDataRange().getValues();
+    const idx = findAccountRow_(rows, name);
+    if (idx < 0) return { ok: false, error: `"${name}" 계정을 찾을 수 없습니다.` };
+    if (String(rows[idx][2]) !== 'admin') return { ok: false, error: '관리자 계정에만 기능 권한을 설정할 수 있습니다.' };
+    const before = parsePerms_(rows[idx][COL_PERMS]);
+    if (permsText_(before) === permsText_(want) && before.join() === want.join()) return { ok: false, error: '이미 같은 권한입니다.' };
+    // 요청한 관리자는 계정 관리 권한이 있고 대상과 다른 사람이므로, 계정 관리 권한자가 아무도 없게 되는 일은 없다
+    if (s.getRange(1, COL_PERMS + 1).getValue() === '') s.getRange(1, COL_PERMS + 1).setValue('기능권한');
+    s.getRange(idx + 1, COL_PERMS + 1).setValue(serializePerms_(want));
+    revokeUserSessions_(name);   // 새 권한이 곧바로 적용되도록 기존 로그인은 폐기
+    return { ok: true, name: name, perms: want, auditNote: `기능권한 ${permsText_(before)} → ${permsText_(want)}` };
   } finally { lock.releaseLock(); }
 }
 function setAccountDisabled({ targetName, disabled, reason, adminName }) {
@@ -1790,6 +1858,7 @@ function getAccounts() {
     pendingVerification: String(r[7]) === 'N',
     dormant: String(r[7]) === 'D',
     disabled: String(r[COL_DISABLED]) === 'Y',
+    perms: String(r[2]) === 'admin' ? parsePerms_(r[COL_PERMS]) : [],
     lastLoginAt: Number(r[COL_LASTLOGIN]) || 0,
     joinedAt: String(r[4] || ''),
     locked: String(r[2]) !== 'admin' && isLoginLocked_(String(r[0]))
@@ -2206,13 +2275,23 @@ function clearRequestsCache() {
   } catch (e) {}
 }
 
-function getRequests({ name, role, force }) {
+// 연락처·이메일 열람 권한이 없는 관리자에게 타인 신청의 값을 가려서 돌려준다 (본인 신청은 그대로)
+function maskPhone_(v) {
+  const t = String(v || '');
+  const d = t.replace(/\D/g, '');
+  return d.length >= 7 ? '***-****-' + d.slice(-4) : (t ? '***' : '');
+}
+function getRequests({ name, role, force, maskPii }) {
   const isAdmin = role === 'admin';
   // 이름 비교 시 앞뒤/중복 공백을 무시(다른 곳과 동일 규칙)
   const norm = s => String(s || '').trim().replace(/\s+/g, ' ');
   const wantName = norm(name);
   // 캐시/전체 조회는 모든 신청을 담지만, 관리자가 아니면 응답에는 본인 신청만 실어 보낸다.
-  const pick = list => isAdmin ? list : list.filter(r => norm(r.name) === wantName);
+  const pick = list => {
+    if (!isAdmin) return list.filter(r => norm(r.name) === wantName);
+    if (!maskPii) return list;
+    return list.map(r => norm(r.name) === wantName ? r : Object.assign({}, r, { contact: maskPhone_(r.contact), email: maskEmail_(r.email) }));
+  };
 
   if (!force) {
     const cached = getRequestsFromCache();
